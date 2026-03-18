@@ -49,7 +49,6 @@
 osThreadId defaultTaskHandle;
 osThreadId ui_taskHandle;
 osThreadId info_taskHandle;
-osThreadId capacitor_taskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -59,7 +58,6 @@ osThreadId capacitor_taskHandle;
 void StartDefaultTask(void const * argument);
 extern void ui_task_func(void const * argument);
 extern void info_task_func(void const * argument);
-extern void capacitor_task_func(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -118,10 +116,6 @@ void MX_FREERTOS_Init(void) {
   /* definition and creation of info_task */
   osThreadDef(info_task, info_task_func, osPriorityNormal, 0, 256);
   info_taskHandle = osThreadCreate(osThread(info_task), NULL);
-
-  /* definition and creation of capacitor_task */
-  osThreadDef(capacitor_task, capacitor_task_func, osPriorityNormal, 0, 256);
-  capacitor_taskHandle = osThreadCreate(osThread(capacitor_task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

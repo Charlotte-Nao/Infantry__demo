@@ -9,6 +9,7 @@
 #include "../../Bsp/led/bsp_led.h"   // LED驱动头文件-状态指示灯控制【保留灯光 不删除】
 #include "../Components/referee/referee.h"
 #include "../Components/super_capacitor/super_capacitor.h"
+#include "../Application/send_info/send_info.h"
 
 void info_task_func(void const * argument) {
 
@@ -18,12 +19,15 @@ void info_task_func(void const * argument) {
     struct usb_device* usb = usb_get_device();
     usb->Init(usb);
 
+    SendInfo_Init();
+
     while (1) {
-        uint32_t current_tick = osKernelSysTick();  // 获取当前系统滴答定时器值(ms)，用于所有计时逻辑
+        SendInfo_CAN2_Periodic();
 
-        uint8_t robot_hp = global_info.super_cap->capacity_voltage;;
+        //uint16_t temp = global_info.super_cap->temperature;
+        //uint16_t cap_v = global_info.super_cap->capacity_voltage;
 
-        usb->Print(usb, "HP: %d\n", robot_hp);  // 通过 USB CDC 输出当前 HP 信息，供上位机显示
+        //usb->Print(usb, "SuperCap: Temp=%dC, Volt=%dV\r\n", temp, cap_v);
 
         osDelay(2);  // 云台任务调度周期 2ms，固定频率保证控制精度
     }

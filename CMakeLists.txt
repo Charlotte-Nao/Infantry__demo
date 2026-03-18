@@ -56,8 +56,6 @@ add_executable(${CMAKE_PROJECT_NAME}
         Components/ist8310_i2c/ist8310_middleware.h
         Application/global_info.c
         Application/global_info.h
-        ALL_Task/capacitor_task.c
-        ALL_Task/capacitor_task.h
         ALL_Task/ui_task.c
         ALL_Task/ui_task.h
         ALL_Task/info_task.c
@@ -66,6 +64,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         Components/Referee/referee.h
         Components/super_capacitor/super_capacitor.c
         Components/super_capacitor/super_capacitor.h
+        Application/send_info/send_info.h
+        Application/send_info/send_info.c
 )
 
 # Add STM32CubeMX generated sources
