@@ -49,27 +49,23 @@ add_executable(${CMAKE_PROJECT_NAME}
         Components/ist8310_i2c/ist8310_driver.h
         Components/BMI088/BMI088driver.c
         Components/BMI088/BMI088Middleware.c
-        Algorithm/MahonyAHRS/MahonyAHRS.c
-        Application/mahony.c
-        Application/mahony.h
-        Application/auto_aim.c
-        Application/auto_aim.h
         Bsp/usb_cdc/bsp_usb_cdc.c
         Bsp/usb_cdc/bsp_usb_cdc.h
         Components/motor/motor.c
         Components/ist8310_i2c/ist8310_middleware.c
         Components/ist8310_i2c/ist8310_middleware.h
-        Application/robot_global.c
-        Application/robot_global.h
-        ALL_Task/sensor_task.c
-        ALL_Task/sensor_task.h
-        ALL_Task/motor_task.c
-        ALL_Task/motor_task.h
-        ALL_Task/chassis_task.c
-        ALL_Task/chassis_task.h
-        ALL_Task/gimbal_task.c
-        ALL_Task/gimbal_task.h
-        Application/auto_aim.c
+        Application/global_info.c
+        Application/global_info.h
+        ALL_Task/capacitor_task.c
+        ALL_Task/capacitor_task.h
+        ALL_Task/ui_task.c
+        ALL_Task/ui_task.h
+        ALL_Task/info_task.c
+        ALL_Task/info_task.h
+        Components/Referee/referee.c
+        Components/Referee/referee.h
+        Components/super_capacitor/super_capacitor.c
+        Components/super_capacitor/super_capacitor.h
 )
 
 # Add STM32CubeMX generated sources

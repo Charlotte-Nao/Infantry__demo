@@ -185,7 +185,7 @@ void USART3_IRQHandler(void)
 /******************************************************************************************
  *                                   VT13 串口中断服务函数 USART6_IRQHandler (原VT13保留)
  ******************************************************************************************/
-void USART6_IRQHandler(void)
+void USART6_IRQHandler_debug(void)
 {
     if (huart6.Instance->SR & UART_FLAG_IDLE)
     {

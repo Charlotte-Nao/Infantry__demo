@@ -35,7 +35,7 @@
 
 #include "../../Components/remote/remote.h"
 
-#include "../../Application/robot_global.h"
+#include "../../Application/global_info.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

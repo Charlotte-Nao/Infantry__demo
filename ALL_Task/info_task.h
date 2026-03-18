@@ -5,6 +5,6 @@
 #ifndef INFANTRY_01_GIMBAL_TASK_H
 #define INFANTRY_01_GIMBAL_TASK_H
 
-void gimbal_task_func(void const * argument);
+void info_task_func(void const * argument);
 
 #endif //INFANTRY_01_GIMBAL_TASK_H

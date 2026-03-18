@@ -5,6 +5,6 @@
 #ifndef INFANTRY_01_LOGIC_TASK_H
 #define INFANTRY_01_LOGIC_TASK_H
 
-void chassis_task_func(void const * argument);
+void ui_task_func(void const * argument);
 
 #endif //INFANTRY_01_LOGIC_TASK_H

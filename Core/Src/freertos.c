@@ -47,10 +47,9 @@
 
 /* USER CODE END Variables */
 osThreadId defaultTaskHandle;
-osThreadId sensor_taskHandle;
-osThreadId motor_taskHandle;
-osThreadId gimbal_taskHandle;
-osThreadId chassis_taskHandle;
+osThreadId ui_taskHandle;
+osThreadId info_taskHandle;
+osThreadId capacitor_taskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -58,10 +57,9 @@ osThreadId chassis_taskHandle;
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void const * argument);
-extern void sensor_task_func(void const * argument);
-extern void motor_task_func(void const * argument);
-extern void gimbal_task_func(void const * argument);
-extern void chassis_task_func(void const * argument);
+extern void ui_task_func(void const * argument);
+extern void info_task_func(void const * argument);
+extern void capacitor_task_func(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -113,21 +111,17 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
-  /* definition and creation of sensor_task */
-  osThreadDef(sensor_task, sensor_task_func, osPriorityHigh, 0, 512);
-  sensor_taskHandle = osThreadCreate(osThread(sensor_task), NULL);
+  /* definition and creation of ui_task */
+  osThreadDef(ui_task, ui_task_func, osPriorityNormal, 0, 512);
+  ui_taskHandle = osThreadCreate(osThread(ui_task), NULL);
 
-  /* definition and creation of motor_task */
-  osThreadDef(motor_task, motor_task_func, osPriorityRealtime, 0, 256);
-  motor_taskHandle = osThreadCreate(osThread(motor_task), NULL);
+  /* definition and creation of info_task */
+  osThreadDef(info_task, info_task_func, osPriorityNormal, 0, 256);
+  info_taskHandle = osThreadCreate(osThread(info_task), NULL);
 
-  /* definition and creation of gimbal_task */
-  osThreadDef(gimbal_task, gimbal_task_func, osPriorityAboveNormal, 0, 1024);
-  gimbal_taskHandle = osThreadCreate(osThread(gimbal_task), NULL);
-
-  /* definition and creation of chassis_task */
-  osThreadDef(chassis_task, chassis_task_func, osPriorityAboveNormal, 0, 512);
-  chassis_taskHandle = osThreadCreate(osThread(chassis_task), NULL);
+  /* definition and creation of capacitor_task */
+  osThreadDef(capacitor_task, capacitor_task_func, osPriorityNormal, 0, 256);
+  capacitor_taskHandle = osThreadCreate(osThread(capacitor_task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
