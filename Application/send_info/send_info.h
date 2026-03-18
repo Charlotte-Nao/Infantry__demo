@@ -1,0 +1,8 @@
+//
+// Created by 14717 on 2026/3/19.
+//
+
+#ifndef INFANTRY_01_SEND_INFO_H
+#define INFANTRY_01_SEND_INFO_H
+
+#endif //INFANTRY_01_SEND_INFO_H
