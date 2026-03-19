@@ -19,6 +19,11 @@ extern DMA_HandleTypeDef hdma_usart6_rx;
  ******************************************************************************************/
 static uint8_t referee_rx_buf[2][REFEREE_RX_BUF_NUM];  // DMA 双缓冲区
 static game_info_t referee_game_info;                  // 裁判系统信息（静态全局）
+static uint8_t referee_tx_seq = 0U;                    // 发送帧序号
+
+#define REF_UI_TX_TIMEOUT_MIN_MS   20U
+#define REF_UI_TX_TIMEOUT_MAX_MS   80U
+#define REF_UI_BAUD_BYTES_PER_MS   12U
 
 /* --- CRC8 查找表 (RoboMaster 标准) --- */
 const uint8_t crc8_table[256] = {
@@ -278,3 +283,256 @@ const game_info_t* Referee_Get_Handle(void)
 {
     return &referee_game_info;
 }
+
+/******************************************************************************************
+ *                                   发送侧封装（USART6）
+ ******************************************************************************************/
+static void Referee_UI_Pack_Figure15(uint8_t out15[15], const interaction_figure_param_t *in)
+{
+    uint32_t cfg1;
+    uint32_t cfg2;
+    uint32_t cfg3;
+
+    if ((out15 == NULL) || (in == NULL))
+    {
+        return;
+    }
+
+    out15[0] = in->figure_name[0];
+    out15[1] = in->figure_name[1];
+    out15[2] = in->figure_name[2];
+
+    cfg1 = ((uint32_t)(in->operate_type & 0x07U)) |
+           (((uint32_t)(in->figure_type & 0x07U)) << 3) |
+           (((uint32_t)(in->layer & 0x0FU)) << 6) |
+           (((uint32_t)(in->color & 0x0FU)) << 10) |
+           (((uint32_t)(in->details_a & 0x01FFU)) << 14) |
+           (((uint32_t)(in->details_b & 0x01FFU)) << 23);
+
+    cfg2 = ((uint32_t)(in->width & 0x03FFU)) |
+           (((uint32_t)(in->start_x & 0x07FFU)) << 10) |
+           (((uint32_t)(in->start_y & 0x07FFU)) << 21);
+
+    cfg3 = ((uint32_t)(in->details_c & 0x03FFU)) |
+           (((uint32_t)(in->details_d & 0x07FFU)) << 10) |
+           (((uint32_t)(in->details_e & 0x07FFU)) << 21);
+
+    out15[3] = (uint8_t)(cfg1 & 0xFFU);
+    out15[4] = (uint8_t)((cfg1 >> 8) & 0xFFU);
+    out15[5] = (uint8_t)((cfg1 >> 16) & 0xFFU);
+    out15[6] = (uint8_t)((cfg1 >> 24) & 0xFFU);
+
+    out15[7] = (uint8_t)(cfg2 & 0xFFU);
+    out15[8] = (uint8_t)((cfg2 >> 8) & 0xFFU);
+    out15[9] = (uint8_t)((cfg2 >> 16) & 0xFFU);
+    out15[10] = (uint8_t)((cfg2 >> 24) & 0xFFU);
+
+    out15[11] = (uint8_t)(cfg3 & 0xFFU);
+    out15[12] = (uint8_t)((cfg3 >> 8) & 0xFFU);
+    out15[13] = (uint8_t)((cfg3 >> 16) & 0xFFU);
+    out15[14] = (uint8_t)((cfg3 >> 24) & 0xFFU);
+}
+
+static uint16_t Referee_Pack_Frame(uint8_t *frame_buf,
+                                   uint16_t cmd_id,
+                                   const uint8_t *payload,
+                                   uint16_t payload_len)
+{
+    uint16_t total_len;
+    uint16_t crc16;
+
+    if ((frame_buf == NULL) || ((payload == NULL) && (payload_len > 0U)))
+    {
+        return 0U;
+    }
+
+    if (payload_len > REFEREE_MAX_DATA_SIZE)
+    {
+        return 0U;
+    }
+
+    total_len = REFEREE_HEADER_SIZE + REFEREE_CMD_ID_SIZE + payload_len + REFEREE_TAIL_SIZE;
+
+    frame_buf[0] = REFEREE_SOF;
+    frame_buf[1] = (uint8_t)(payload_len & 0xFFU);
+    frame_buf[2] = (uint8_t)((payload_len >> 8) & 0xFFU);
+    frame_buf[3] = referee_tx_seq++;
+    frame_buf[4] = Referee_CRC8(frame_buf, 4U);
+
+    frame_buf[5] = (uint8_t)(cmd_id & 0xFFU);
+    frame_buf[6] = (uint8_t)((cmd_id >> 8) & 0xFFU);
+
+    if (payload_len > 0U)
+    {
+        memcpy(&frame_buf[7], payload, payload_len);
+    }
+
+    crc16 = Referee_CRC16(frame_buf, (uint16_t)(total_len - REFEREE_TAIL_SIZE));
+    frame_buf[total_len - 2U] = (uint8_t)(crc16 & 0xFFU);
+    frame_buf[total_len - 1U] = (uint8_t)((crc16 >> 8) & 0xFFU);
+
+    return total_len;
+}
+
+uint16_t Referee_Get_ClientId_By_RobotId(uint16_t robot_id)
+{
+    switch (robot_id)
+    {
+        case REF_ROBOT_ID_RED_HERO:
+        case REF_ROBOT_ID_RED_ENGINEER:
+        case REF_ROBOT_ID_RED_INFANTRY3:
+        case REF_ROBOT_ID_RED_INFANTRY4:
+        case REF_ROBOT_ID_RED_INFANTRY5:
+        case REF_ROBOT_ID_RED_AERIAL:
+        case REF_ROBOT_ID_BLUE_HERO:
+        case REF_ROBOT_ID_BLUE_ENGINEER:
+        case REF_ROBOT_ID_BLUE_INFANTRY3:
+        case REF_ROBOT_ID_BLUE_INFANTRY4:
+        case REF_ROBOT_ID_BLUE_INFANTRY5:
+        case REF_ROBOT_ID_BLUE_AERIAL:
+            return (uint16_t)(robot_id + 0x0100U);
+
+        default:
+            return 0U; // 例如哨兵/雷达无对应选手端时返回无效 ID
+    }
+}
+
+uint8_t Referee_Send_Interactive(uint16_t data_cmd_id,
+                                 uint16_t sender_id,
+                                 uint16_t receiver_id,
+                                 const uint8_t *data,
+                                 uint16_t data_len)
+{
+    uint8_t payload[6 + REF_INTERACT_DATA_MAX_LEN];
+    uint8_t frame[REFEREE_HEADER_SIZE + REFEREE_CMD_ID_SIZE + 6 + REF_INTERACT_DATA_MAX_LEN + REFEREE_TAIL_SIZE];
+    uint16_t payload_len;
+    uint16_t frame_len;
+    uint32_t tx_timeout_ms;
+    HAL_StatusTypeDef ret;
+
+    if ((data_len > 0U) && (data == NULL))
+    {
+        return 0U;
+    }
+
+    if (data_len > REF_INTERACT_DATA_MAX_LEN)
+    {
+        return 0U;
+    }
+
+    payload[0] = (uint8_t)(data_cmd_id & 0xFFU);
+    payload[1] = (uint8_t)((data_cmd_id >> 8) & 0xFFU);
+    payload[2] = (uint8_t)(sender_id & 0xFFU);
+    payload[3] = (uint8_t)((sender_id >> 8) & 0xFFU);
+    payload[4] = (uint8_t)(receiver_id & 0xFFU);
+    payload[5] = (uint8_t)((receiver_id >> 8) & 0xFFU);
+
+    if (data_len > 0U)
+    {
+        memcpy(&payload[6], data, data_len);
+    }
+
+    payload_len = (uint16_t)(6U + data_len);
+    frame_len = Referee_Pack_Frame(frame, CMD_ID_ROBOT_INTERACT, payload, payload_len);
+    if (frame_len == 0U)
+    {
+        return 0U;
+    }
+
+    tx_timeout_ms = ((uint32_t)frame_len / REF_UI_BAUD_BYTES_PER_MS) + 6U;
+    if (tx_timeout_ms < REF_UI_TX_TIMEOUT_MIN_MS)
+    {
+        tx_timeout_ms = REF_UI_TX_TIMEOUT_MIN_MS;
+    }
+    if (tx_timeout_ms > REF_UI_TX_TIMEOUT_MAX_MS)
+    {
+        tx_timeout_ms = REF_UI_TX_TIMEOUT_MAX_MS;
+    }
+
+    ret = HAL_UART_Transmit(&huart6, frame, frame_len, tx_timeout_ms);
+    return (ret == HAL_OK) ? 1U : 0U;
+}
+
+uint8_t Referee_UI_Delete(uint16_t sender_id, uint16_t receiver_id, uint8_t delete_type, uint8_t layer)
+{
+    interaction_layer_delete_t del;
+    del.delete_type = delete_type;
+    del.layer = layer;
+
+    return Referee_Send_Interactive(REF_UI_DATA_ID_DELETE,
+                                    sender_id,
+                                    receiver_id,
+                                    (const uint8_t *)&del,
+                                    (uint16_t)sizeof(del));
+}
+
+uint8_t Referee_UI_Draw1(uint16_t sender_id, uint16_t receiver_id, const interaction_figure_param_t *figure)
+{
+    uint8_t packed[15];
+
+    if (figure == NULL)
+    {
+        return 0U;
+    }
+
+    Referee_UI_Pack_Figure15(packed, figure);
+    return Referee_Send_Interactive(REF_UI_DATA_ID_DRAW_1, sender_id, receiver_id, packed, sizeof(packed));
+}
+
+uint8_t Referee_UI_Draw2(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[2])
+{
+    uint8_t packed[30];
+
+    if (figures == NULL)
+    {
+        return 0U;
+    }
+
+    Referee_UI_Pack_Figure15(&packed[0], &figures[0]);
+    Referee_UI_Pack_Figure15(&packed[15], &figures[1]);
+
+    return Referee_Send_Interactive(REF_UI_DATA_ID_DRAW_2, sender_id, receiver_id, packed, sizeof(packed));
+}
+
+uint8_t Referee_UI_Draw5(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[5])
+{
+    uint8_t packed[75];
+    uint8_t i;
+
+    if (figures == NULL)
+    {
+        return 0U;
+    }
+
+    for (i = 0U; i < 5U; i++)
+    {
+        Referee_UI_Pack_Figure15(&packed[i * 15U], &figures[i]);
+    }
+
+    return Referee_Send_Interactive(REF_UI_DATA_ID_DRAW_5, sender_id, receiver_id, packed, sizeof(packed));
+}
+
+uint8_t Referee_UI_Draw7(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[7])
+{
+    uint8_t packed[105];
+    uint8_t i;
+
+    if (figures == NULL)
+    {
+        return 0U;
+    }
+
+    for (i = 0U; i < 7U; i++)
+    {
+        Referee_UI_Pack_Figure15(&packed[i * 15U], &figures[i]);
+    }
+
+    return Referee_Send_Interactive(REF_UI_DATA_ID_DRAW_7, sender_id, receiver_id, packed, sizeof(packed));
+}
+

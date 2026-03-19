@@ -20,8 +20,82 @@
 #define CMD_ID_EVENT_DATA       0x0101      // 事件数据
 #define CMD_ID_ROBOT_STATUS     0x0201      // 机器人状态信息
 #define CMD_ID_POWER_HEAT_DATA  0x0202      // 功率和热量数据
-#define CMD_ID_HURT_DATA        0x0203      // 受伤数据
+#define CMD_ID_HURT_DATA        0x0206      // 受伤数据
 #define CMD_ID_RFID_STATUS      0x0209      // RFID 增益点状态
+#define CMD_ID_ROBOT_INTERACT   0x0301      // 机器人交互数据（含客户端绘图）
+
+/* --- 交互子内容 ID --- */
+#define REF_UI_DATA_ID_DELETE   0x0100
+#define REF_UI_DATA_ID_DRAW_1   0x0101
+#define REF_UI_DATA_ID_DRAW_2   0x0102
+#define REF_UI_DATA_ID_DRAW_5   0x0103
+#define REF_UI_DATA_ID_DRAW_7   0x0104
+#define REF_UI_DATA_ID_CHAR     0x0110
+
+/* --- 机器人交互数据长度上限（协议 x <= 112） --- */
+#define REF_INTERACT_DATA_MAX_LEN 112U
+
+/* --- 机器人 ID（官方定义） --- */
+#define REF_ROBOT_ID_RED_HERO        1U
+#define REF_ROBOT_ID_RED_ENGINEER    2U
+#define REF_ROBOT_ID_RED_INFANTRY3   3U
+#define REF_ROBOT_ID_RED_INFANTRY4   4U
+#define REF_ROBOT_ID_RED_INFANTRY5   5U
+#define REF_ROBOT_ID_RED_AERIAL      6U
+#define REF_ROBOT_ID_RED_SENTRY      7U
+#define REF_ROBOT_ID_RED_DART        8U
+#define REF_ROBOT_ID_RED_RADAR       9U
+#define REF_ROBOT_ID_RED_OUTPOST     10U
+#define REF_ROBOT_ID_RED_BASE        11U
+
+#define REF_ROBOT_ID_BLUE_HERO       101U
+#define REF_ROBOT_ID_BLUE_ENGINEER   102U
+#define REF_ROBOT_ID_BLUE_INFANTRY3  103U
+#define REF_ROBOT_ID_BLUE_INFANTRY4  104U
+#define REF_ROBOT_ID_BLUE_INFANTRY5  105U
+#define REF_ROBOT_ID_BLUE_AERIAL     106U
+#define REF_ROBOT_ID_BLUE_SENTRY     107U
+#define REF_ROBOT_ID_BLUE_DART       108U
+#define REF_ROBOT_ID_BLUE_RADAR      109U
+#define REF_ROBOT_ID_BLUE_OUTPOST    110U
+#define REF_ROBOT_ID_BLUE_BASE       111U
+
+/* --- 常用接收者 ID --- */
+#define REF_RECEIVER_ID_SERVER        0x8080U
+
+/* --- 图形操作/类型/颜色枚举 --- */
+typedef enum
+{
+    REF_UI_OP_NULL = 0,
+    REF_UI_OP_ADD = 1,
+    REF_UI_OP_MODIFY = 2,
+    REF_UI_OP_DELETE = 3,
+} referee_ui_op_t;
+
+typedef enum
+{
+    REF_UI_TYPE_LINE = 0,
+    REF_UI_TYPE_RECT = 1,
+    REF_UI_TYPE_CIRCLE = 2,
+    REF_UI_TYPE_ELLIPSE = 3,
+    REF_UI_TYPE_ARC = 4,
+    REF_UI_TYPE_FLOAT = 5,
+    REF_UI_TYPE_INT = 6,
+    REF_UI_TYPE_CHAR = 7,
+} referee_ui_type_t;
+
+typedef enum
+{
+    REF_UI_COLOR_SELF = 0,
+    REF_UI_COLOR_YELLOW = 1,
+    REF_UI_COLOR_GREEN = 2,
+    REF_UI_COLOR_ORANGE = 3,
+    REF_UI_COLOR_PURPLE = 4,
+    REF_UI_COLOR_PINK = 5,
+    REF_UI_COLOR_CYAN = 6,
+    REF_UI_COLOR_BLACK = 7,
+    REF_UI_COLOR_WHITE = 8,
+} referee_ui_color_t;
 
 /* --- DMA 双缓冲区配置 --- */
 #define REFEREE_RX_BUF_NUM      512         // 单个缓冲区大小（根据实际最大帧长调整）
@@ -273,6 +347,38 @@ typedef struct __attribute__((packed))
     uint8_t rfid_status_2;      /**< RFID 状态寄存器 2 (bit 32-39，共 6 个隧道增益点状态) */
 } rfid_status_t;
 
+/* --- 客户端交互结构体（0x0301 载荷） --- */
+typedef struct __attribute__((packed))
+{
+    uint16_t data_cmd_id;   /**< 子内容 ID，如 0x0101 */
+    uint16_t sender_id;     /**< 发送者 robot_id */
+    uint16_t receiver_id;   /**< 接收者 ID（客户端/机器人） */
+} ext_student_interactive_header_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t delete_type;    /**< 0:空操作 1:删除图层 2:删除所有 */
+    uint8_t layer;          /**< 图层 0~9 */
+} interaction_layer_delete_t;
+
+/* 图形参数描述（用于打包为 15 字节 interaction_figure） */
+typedef struct
+{
+    uint8_t figure_name[3];
+    uint8_t operate_type;   /**< 0:空 1:增加 2:修改 3:删除 */
+    uint8_t figure_type;    /**< 0:直线 1:矩形 2:圆 3:椭圆 4:圆弧 5:浮点 6:整型 7:字符 */
+    uint8_t layer;          /**< 0~9 */
+    uint8_t color;          /**< 0~8 */
+    uint16_t details_a;     /**< 9 bit */
+    uint16_t details_b;     /**< 9 bit */
+    uint16_t width;         /**< 10 bit */
+    uint16_t start_x;       /**< 11 bit */
+    uint16_t start_y;       /**< 11 bit */
+    uint16_t details_c;     /**< 10 bit */
+    uint16_t details_d;     /**< 11 bit */
+    uint16_t details_e;     /**< 11 bit */
+} interaction_figure_param_t;
+
 /* --- 全局游戏信息聚合结构体 --- */
 /**
  * @brief 全局游戏信息结构体（裁判系统数据总集合）
@@ -315,5 +421,56 @@ void Referee_Init(void);
  * @return game_info_t* 裁判系统信息指针（只包含裁判系统数据）
  */
 const game_info_t* Referee_Get_Handle(void);
+
+/**
+ * @brief 通用 0x0301 机器人交互发送
+ * @param data_cmd_id 子内容 ID（如 REF_UI_DATA_ID_DRAW_1）
+ * @param sender_id 发送者 robot_id
+ * @param receiver_id 接收者 ID（客户端/机器人）
+ * @param data 交互数据段
+ * @param data_len 交互数据段长度（<=112）
+ * @return 1 发送成功, 0 失败
+ */
+uint8_t Referee_Send_Interactive(uint16_t data_cmd_id,
+                                 uint16_t sender_id,
+                                 uint16_t receiver_id,
+                                 const uint8_t *data,
+                                 uint16_t data_len);
+
+/**
+ * @brief 删除图层/全部图层（子内容 0x0100）
+ */
+uint8_t Referee_UI_Delete(uint16_t sender_id, uint16_t receiver_id, uint8_t delete_type, uint8_t layer);
+
+/**
+ * @brief 绘制一个图形（子内容 0x0101）
+ */
+uint8_t Referee_UI_Draw1(uint16_t sender_id, uint16_t receiver_id, const interaction_figure_param_t *figure);
+
+/**
+ * @brief 绘制两个图形（子内容 0x0102）
+ */
+uint8_t Referee_UI_Draw2(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[2]);
+
+/**
+ * @brief 绘制五个图形（子内容 0x0103）
+ */
+uint8_t Referee_UI_Draw5(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[5]);
+
+/**
+ * @brief 绘制七个图形（子内容 0x0104）
+ */
+uint8_t Referee_UI_Draw7(uint16_t sender_id,
+                         uint16_t receiver_id,
+                         const interaction_figure_param_t figures[7]);
+
+/**
+ * @brief robot_id 转客户端 ID（常规规则：client_id = robot_id + 0x0100）
+ */
+uint16_t Referee_Get_ClientId_By_RobotId(uint16_t robot_id);
 
 #endif //INFANTRY_01_REFEREE_H
