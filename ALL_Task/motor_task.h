@@ -5,6 +5,6 @@
 #ifndef INFANTRY_01_CONTROL_TASK_H
 #define INFANTRY_01_CONTROL_TASK_H
 
-void control_task_func(void const * argument);
+void motor_task_func(void const * argument);
 
 #endif //INFANTRY_01_CONTROL_TASK_H

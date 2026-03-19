@@ -69,8 +69,9 @@ void gimbal_task_func(void const * argument) {
         uint32_t current_tick = osKernelSysTick();  // 获取当前系统滴答定时器值(ms)，用于所有计时逻辑
 
         /**************************************** 【最高优先级】VT13遥控器掉线全局急停保护 ****************************************/
-        // 遥控器超时判定：超过200ms未收到VT13遥控器数据，判定为遥控器掉线/失联
-        if (current_tick - robot_ctrl.rc->vt13.last_update_tick > 1000) {
+        // 遥控器超时判定：使用有符号差值，避免并发更新导致无符号下溢误判
+        int32_t rc_tick_diff = (int32_t)(current_tick - robot_ctrl.rc->vt13.last_update_tick);
+        if (rc_tick_diff > 1000) {
             robot_ctrl.monitor.remote_online = 0;        // 置位遥控器离线标志位
             robot_ctrl.monitor.system_enabled = 0;       // 统一使能拉低，避免云台/底盘状态分叉
             robot_ctrl.monitor.plan_enabled = 0;

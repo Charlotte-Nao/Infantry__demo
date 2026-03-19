@@ -18,6 +18,8 @@ extern DMA_HandleTypeDef hdma_usart6_rx;
 static uint8_t sbus_rx_buf[2][SBUS_RX_BUF_NUM_DT7];  // DT7 DMA双缓冲区
 static uint8_t rc_rx_buf[2][RC_RX_BUF_SIZE_VT13];    // VT13 DMA双缓冲区
 static RC_ctrl_t remote_ctrl;                        // 合并后的总遥控器数据，全局唯一
+static volatile uint32_t vt13_rx_ok_cnt = 0U;
+static volatile uint32_t vt13_rx_bad_len_cnt = 0U;
 
 /******************************************************************************************
  *                                   VT13 官方 CRC16 校验表 (原VT13保留)
@@ -205,7 +207,12 @@ void USART6_IRQHandler(void)
 
         if (rx_len == RC_FRAME_LENGTH_VT13)
         {
+            vt13_rx_ok_cnt++;
             RC_Data_Parse(rc_rx_buf[current_mem], &remote_ctrl.vt13);
+        }
+        else
+        {
+            vt13_rx_bad_len_cnt++;
         }
     }
 }
@@ -267,4 +274,14 @@ void RC_Unable_VT13(void) { __HAL_UART_DISABLE(&huart6); }
 const RC_ctrl_t *RC_Get_Handle(void)
 {
     return &remote_ctrl;
+}
+
+void RC_Get_VT13_RxDiag(uint32_t *ok_cnt, uint32_t *bad_len_cnt)
+{
+    if (ok_cnt != NULL) {
+        *ok_cnt = vt13_rx_ok_cnt;
+    }
+    if (bad_len_cnt != NULL) {
+        *bad_len_cnt = vt13_rx_bad_len_cnt;
+    }
 }

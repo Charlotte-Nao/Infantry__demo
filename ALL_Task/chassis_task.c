@@ -2,6 +2,7 @@
 #include "../Components/motor/motor.h"
 #include "../Bsp/uart/bsp_uart.h"
 #include "../Application/robot_global.h"
+#include "../Components/remote/remote.h"
 #include "math.h"
 #include "stdlib.h"
 #include "cmsis_os.h"
@@ -55,6 +56,10 @@ static uint8_t last_e_pressed = 0;       // 上一帧 E 键状态（防抖）
 static uint8_t cap_low_gear_lock = 0;    // 超级电容低压锁档（滞回）
 static uint8_t last_custom_r_pressed = 0;// 上一帧 custom_r 状态（路径规划开关防抖）
 
+static struct uart_device *log_uart = NULL;
+
+#define LOG_PRINT(...) do { if (log_uart != NULL) { log_uart->Print(log_uart, __VA_ARGS__); } } while (0)
+
 static float Rad_Format(float angle) {
     while (angle >  (float)M_PI) angle -= 2.0f * (float)M_PI;
     while (angle < -(float)M_PI) angle += 2.0f * (float)M_PI;
@@ -77,6 +82,8 @@ void chassis_task_func(void const * argument) {
     static uint8_t last_enable_cmd = 0;
     static uint8_t last_disable_cmd = 0;
     float wheel_targets[4] = {0};
+    uint8_t last_remote_online = 0xFFU;
+    uint32_t last_diag_tick = 0U;
 
     /******************************************************************************************************************/
     // 系统启动保护
@@ -87,10 +94,15 @@ void chassis_task_func(void const * argument) {
     // 主循环
     while (1) {
         uint32_t current_tick = osKernelSysTick();
+        if (log_uart == NULL) {
+            log_uart = uart_get_device("uart1_dma");
+        }
 
         /**************************************************************************************************************/
-        // 遥控器掉线检测
-        if (current_tick - rc->vt13.last_update_tick > 1000) {
+        // 遥控器掉线检测：使用快照+有符号差值，避免与中断并发更新导致的无符号下溢误判
+        uint32_t rc_last_tick = rc->vt13.last_update_tick;
+        int32_t rc_tick_diff = (int32_t)(current_tick - rc_last_tick);
+        if (rc_tick_diff > 1000) {
             robot_ctrl.monitor.remote_online = 0;
             robot_ctrl.monitor.system_enabled = 0;
             robot_ctrl.monitor.plan_enabled = 0;
@@ -107,6 +119,13 @@ void chassis_task_func(void const * argument) {
             last_q_pressed = 0;
             last_e_pressed = 0;
             last_custom_r_pressed = 0;
+
+            if (last_remote_online != 0U) {
+                LOG_PRINT("[CHS][TIMEOUT] t=%lu last_rc=%lu dt=%ld\r\n",
+                          (unsigned long)current_tick,
+                          (unsigned long)rc_last_tick,
+                          (long)rc_tick_diff);
+            }
         } else {
             robot_ctrl.monitor.remote_online = 1;
             /**********************************************************************************************************/
@@ -127,6 +146,18 @@ void chassis_task_func(void const * argument) {
                 robot_ctrl.monitor.system_enabled = 1;
             } else if (pause_trigger) {
                 robot_ctrl.monitor.system_enabled ^= 1U;
+            }
+
+            if (robot_ctrl.monitor.system_enabled != prev_system_enabled) {
+                LOG_PRINT("[CHS][SYS_EN] t=%lu %u->%u trig(x/c/p)=%u/%u/%u key=0x%04X pause=%u\r\n",
+                          (unsigned long)current_tick,
+                          (unsigned int)prev_system_enabled,
+                          (unsigned int)robot_ctrl.monitor.system_enabled,
+                          (unsigned int)disable_trigger,
+                          (unsigned int)enable_trigger,
+                          (unsigned int)pause_trigger,
+                          (unsigned int)rc->vt13.key_vt13.v,
+                          (unsigned int)pause_cmd);
             }
 
             if (!robot_ctrl.monitor.system_enabled && prev_system_enabled) {
@@ -152,8 +183,35 @@ void chassis_task_func(void const * argument) {
             uint8_t custom_r_pressed = rc->vt13.rc_vt13.custom_r ? 1U : 0U;
             if (custom_r_pressed && !last_custom_r_pressed && robot_ctrl.monitor.system_enabled) {
                 robot_ctrl.monitor.plan_enabled ^= 1U;
+                LOG_PRINT("[CHS][PLAN] t=%lu plan=%u\r\n",
+                          (unsigned long)current_tick,
+                          (unsigned int)robot_ctrl.monitor.plan_enabled);
             }
             last_custom_r_pressed = custom_r_pressed;
+        }
+
+        if (last_remote_online != robot_ctrl.monitor.remote_online) {
+            LOG_PRINT("[CHS][REMOTE] t=%lu online=%u\r\n",
+                      (unsigned long)current_tick,
+                      (unsigned int)robot_ctrl.monitor.remote_online);
+            last_remote_online = robot_ctrl.monitor.remote_online;
+        }
+
+        if ((uint32_t)(current_tick - last_diag_tick) >= 1000U) {
+            uint32_t ok_cnt = 0U, bad_len_cnt = 0U;
+            RC_Get_VT13_RxDiag(&ok_cnt, &bad_len_cnt);
+            // 心跳也基于快照差值，避免并发读写造成显示为 0xFFFFFFFF
+            uint32_t hb_last_tick = rc->vt13.last_update_tick;
+            int32_t hb_tick_diff = (int32_t)(current_tick - hb_last_tick);
+            LOG_PRINT("[CHS][HB] t=%lu remote=%u sys=%u plan=%u rc_dt=%lu rx_ok=%lu rx_bad=%lu\r\n",
+                      (unsigned long)current_tick,
+                      (unsigned int)robot_ctrl.monitor.remote_online,
+                      (unsigned int)robot_ctrl.monitor.system_enabled,
+                      (unsigned int)robot_ctrl.monitor.plan_enabled,
+                      (unsigned long)((hb_tick_diff >= 0) ? hb_tick_diff : 0),
+                      (unsigned long)ok_cnt,
+                      (unsigned long)bad_len_cnt);
+            last_diag_tick = current_tick;
         }
 
         /**************************************************************************************************************/

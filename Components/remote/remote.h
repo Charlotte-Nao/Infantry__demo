@@ -137,7 +137,7 @@ typedef struct __attribute__((packed))
     {
         uint16_t v;         // 键盘位图
     } key_dt7;
-    uint32_t last_update_tick; // DT7最后更新时间戳
+    volatile uint32_t last_update_tick; // DT7最后更新时间戳（IRQ更新，任务读取）
 } RC_dt7_t;
 
 /******************************************************************************************
@@ -160,7 +160,7 @@ typedef struct {
     struct {
         uint16_t v;         // 键盘位图
     } key_vt13;
-    uint32_t last_update_tick;  // VT13最后更新时间戳
+    volatile uint32_t last_update_tick;  // VT13最后更新时间戳（IRQ更新，任务读取）
 } RC_vt13_t;
 
 /******************************************************************************************
@@ -181,6 +181,7 @@ void RC_Init(void);        // 一键初始化双遥控器
 const RC_ctrl_t *RC_Get_Handle(void); // 获取总遥控器句柄
 void RC_Unable_DT7(void);
 void RC_Unable_VT13(void);
+void RC_Get_VT13_RxDiag(uint32_t *ok_cnt, uint32_t *bad_len_cnt);
 
 #endif
 

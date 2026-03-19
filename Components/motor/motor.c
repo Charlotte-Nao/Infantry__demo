@@ -42,7 +42,42 @@ struct DM_MIT_data {
     float P_MAX;
     float V_MAX;
     float T_MAX;
+
+    // 非阻塞恢复控制时间戳（用于按反馈帧状态自动清错/重使能）
+    uint32_t last_clear_cmd_tick;
+    uint32_t last_enable_cmd_tick;
+    uint8_t enable_requested;
 };
+
+#define DM_ERR_DISABLED      0x0
+#define DM_ERR_ENABLED       0x1
+#define DM_ERR_FAULT_MIN     0x8
+#define DM_ERR_FAULT_MAX     0xE
+
+#define DM_CLEAR_RETRY_MS    50U
+#define DM_ENABLE_RETRY_MS   20U
+
+static void DM_send_special_cmd(struct motor_device *motor, uint8_t cmd)
+{
+    if (motor == NULL || motor->motor_data == NULL || motor->motor_can_handle == NULL) return;
+
+    CAN_TxHeaderTypeDef tx_msg;
+    uint8_t tx_data[8];
+    uint32_t send_mail_box = 0;
+
+    memset(&tx_msg, 0, sizeof(tx_msg));
+    tx_msg.StdId = (uint32_t)(motor->motor_id & 0x7FFU);
+    tx_msg.IDE = CAN_ID_STD;
+    tx_msg.RTR = CAN_RTR_DATA;
+    tx_msg.DLC = 8;
+
+    for (int i = 0; i < 7; ++i) {
+        tx_data[i] = 0xFF;
+    }
+    tx_data[7] = cmd;
+
+    HAL_CAN_AddTxMessage(motor->motor_can_handle, &tx_msg, tx_data, &send_mail_box);
+}
 
 void DM_MIT_init(struct motor_device *motor, uint32_t motor_ID, CAN_HandleTypeDef *hcan, int para_num, ...)
 {
@@ -107,15 +142,15 @@ void DM_MIT_init(struct motor_device *motor, uint32_t motor_ID, CAN_HandleTypeDe
 }
 
 /* 解析 CAN 8 字节反馈帧：
-   D[0]: ID (低4位，可选) | ERR (高4位)
+   D[0]: ID(低4位) | ERR(高4位)
    D[1]: POS[15:8]
    D[2]: POS[7:0]
    D[3]: VEL[11:4]
-   D[4]: VEL[3:0]
-   D[5]: T_MOS
-   D[6]: T[11:8] (低4位)
-   D[7]: T[7:0]
-*/
+   D[4]: VEL[3:0] | T[11:8]
+   D[5]: T[7:0]
+   D[6]: T_MOS
+   D[7]: T_Rotor
+ */
 void DM_get_measure(const struct motor_device *motor, const uint8_t *data)
 {
     if (motor == NULL || motor->motor_data == NULL || data == NULL) {
@@ -173,6 +208,29 @@ void DM_MIT_send_ctrl_cmd(struct motor_device *motor)
     if (motor == NULL || motor->motor_data == NULL) return;
 
     struct DM_MIT_data *d = (struct DM_MIT_data *)motor->motor_data;
+    uint32_t now = osKernelSysTick();
+
+    // 软件失能锁存：上层调用 disable 后，不再自动清错/重使能
+    if (d->enable_requested == 0U) {
+        return;
+    }
+
+    // 基于反馈 ERR 状态做非阻塞恢复：故障先清错，失能先重使能，只有使能态才下发 MIT 控制
+    if (d->ERR >= DM_ERR_FAULT_MIN && d->ERR <= DM_ERR_FAULT_MAX) {
+        if ((uint32_t)(now - d->last_clear_cmd_tick) >= DM_CLEAR_RETRY_MS) {
+            DM_send_special_cmd(motor, 0xFB); // 清除错误
+            d->last_clear_cmd_tick = now;
+        }
+        return;
+    }
+
+    if (d->ERR == DM_ERR_DISABLED) {
+        if ((uint32_t)(now - d->last_enable_cmd_tick) >= DM_ENABLE_RETRY_MS) {
+            DM_send_special_cmd(motor, 0xFC); // 使能
+            d->last_enable_cmd_tick = now;
+        }
+        return;
+    }
 
     /* p_des: 16-bit unsigned */
     uint16_t pdes = (uint16_t)((d->_p_des + d->P_MAX) / (d->P_MAX * 2.0f) * 65535.0f);
@@ -236,64 +294,25 @@ void DM_MIT_send_ctrl_cmd(struct motor_device *motor)
 /* 电机失能指令帧发送（原DM_disable */
 void DM_MIT_send_disable_cmd(struct motor_device *motor)
 {
-    // 空指针校验，符合代码中一贯的安全处理风格
     if (motor == NULL || motor->motor_data == NULL) return;
-
-    /* 组帧：失能帧数据段为 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFD */
-    CAN_TxHeaderTypeDef tx_msg;
-    uint8_t tx_data[8];
-    uint32_t send_mail_box = 0;
-
-    // 初始化CAN发送头，与控制指令帧保持一致的初始化方式
-    memset(&tx_msg, 0, sizeof(tx_msg));
-    tx_msg.StdId = (uint32_t)(motor->motor_id & 0x7FFU); /* 帧ID等于电机ID，保留11位安全掩码 */
-    tx_msg.IDE = CAN_ID_STD;
-    tx_msg.RTR = CAN_RTR_DATA;
-    tx_msg.DLC = 8; /* 数据长度固定为8字节 */
-
-    // 设置失能帧的数据段：前7字节为0xFF，第8字节为0xFD
-    for (int i = 0; i < 7; ++i) {
-        tx_data[i] = 0xFF;
-    }
-    tx_data[7] = 0xFD;
-
-    /* 发送CAN帧，复用HAL库函数，与控制指令帧逻辑一致 */
-    HAL_CAN_AddTxMessage(motor->motor_can_handle, &tx_msg, tx_data, &send_mail_box);
+    struct DM_MIT_data *d = (struct DM_MIT_data *)motor->motor_data;
+    d->enable_requested = 0U;
+    DM_send_special_cmd(motor, 0xFD);
 }
 
 // 使能帧的发送函数
 void DM_MIT_send_enable_cmd(struct motor_device *motor)
 {
     if (motor == NULL || motor->motor_data == NULL) return;
+    struct DM_MIT_data *d = (struct DM_MIT_data *)motor->motor_data;
 
-    uint32_t send_mail_box;
-    CAN_TxHeaderTypeDef enable_tx_message;
-    uint8_t enable_can_send_data[8];
-    uint8_t clear_error_data[8];
+    d->enable_requested = 1U;
 
-    memset(&enable_tx_message, 0, sizeof(enable_tx_message));
-    enable_tx_message.StdId = (uint32_t)(motor->motor_id & 0x7FFU);
-    enable_tx_message.IDE = CAN_ID_STD;
-    enable_tx_message.RTR = CAN_RTR_DATA;
-    enable_tx_message.DLC = 0x08;
-
-    for (int i = 0; i < 7; ++i) clear_error_data[i] = 0xFF;
-    clear_error_data[7] = 0xFB;
-
-    HAL_CAN_AddTxMessage(motor->motor_can_handle, &enable_tx_message, clear_error_data, &send_mail_box);
-
-    osDelay(50);
-
-    memset(&enable_tx_message, 0, sizeof(enable_tx_message));
-    enable_tx_message.StdId = (uint32_t)(motor->motor_id & 0x7FFU);
-    enable_tx_message.IDE = CAN_ID_STD;
-    enable_tx_message.RTR = CAN_RTR_DATA;
-    enable_tx_message.DLC = 0x08;
-
-    for (int i = 0; i < 7; ++i) enable_can_send_data[i] = 0xFF;
-    enable_can_send_data[7] = 0xFC; // 初始化使能帧标识
-
-    HAL_CAN_AddTxMessage(motor->motor_can_handle, &enable_tx_message, enable_can_send_data, &send_mail_box);
+    // 先发清错再发使能（非阻塞），后续由 send_ctrl_cmd 基于 ERR 自动重试
+    DM_send_special_cmd(motor, 0xFB);
+    DM_send_special_cmd(motor, 0xFC);
+    d->last_clear_cmd_tick = osKernelSysTick();
+    d->last_enable_cmd_tick = d->last_clear_cmd_tick;
 }
 
 void DM_MIT_set_target(const struct motor_device *motor, const int para_num, ...) {
