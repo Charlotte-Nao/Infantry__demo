@@ -27,8 +27,8 @@
 #define CHASSIS_SPEED_GEAR_HIGH  1.5f
 
 // 超级电容低压滞回阈值（capacity_voltage 单位：*100）
-#define CAP_VOLT_ENTER_LOW_GEAR  800  // <= 17.00V 强制最低档
-#define CAP_VOLT_EXIT_LOW_GEAR   1500  // >= 18.50V 才允许回中档
+#define CAP_VOLT_ENTER_LOW_GEAR  800  // <= 8.00V 强制最低档
+#define CAP_VOLT_EXIT_LOW_GEAR   1500  // >= 15.00V 才允许回中档
 
 // 回正相关参数
 #define YAW_ALIGN_THRESHOLD     0.05f    // 放宽到位阈值（适配机械误差，约2.86度）
