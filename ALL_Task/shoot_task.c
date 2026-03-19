@@ -11,6 +11,13 @@
 #define SHOOT_FW_SPEED         6000.0f
 #define STIR_REVERSE_SPEED     2500.0f
 #define SHOOT_HEAT_LIMIT_17MM  200U
+#define SHOOT_TASK_PERIOD_MS   2U
+
+/* 长按连发参数：先单发，再按住一段时间进入连发 */
+#define FIRE_HOLD_START_MS     180U
+#define FIRE_BURST_INTERVAL_MS 60U
+#define FIRE_HOLD_START_TICKS  (FIRE_HOLD_START_MS / SHOOT_TASK_PERIOD_MS)
+#define FIRE_BURST_TICKS       (FIRE_BURST_INTERVAL_MS / SHOOT_TASK_PERIOD_MS)
 
 /* Trigger plate step config (output side). */
 #define STIR_ENCODER_CPR           8192.0f
@@ -32,6 +39,9 @@ void shoot_task_func(void const * argument)
 	int32_t stir_target_sum = 0;
 	uint8_t stir_target_inited = 0U;
 	uint8_t last_fire_btn = 0U;
+	uint16_t fire_hold_ticks = 0U;
+	uint16_t fire_burst_ticks = 0U;
+	uint8_t auto_fire_active = 0U;
 	(void)argument;
 
 	for (;;)
@@ -78,6 +88,9 @@ void shoot_task_func(void const * argument)
 		{
 			stir_target_sum = stir_pos_sum;
 			last_fire_btn = 0U;
+			fire_hold_ticks = 0U;
+			fire_burst_ticks = 0U;
+			auto_fire_active = 0U;
 		}
 
 		if (robot_ctrl.gimbal_mode == GIMBAL_REMOTE)
@@ -100,17 +113,60 @@ void shoot_task_func(void const * argument)
 			stir_m->set_target(stir_m, 2, STIR_REVERSE_SPEED, 1.0);
 			stir_target_sum = stir_pos_sum;
 			last_fire_btn = 0U;
+			fire_hold_ticks = 0U;
+			fire_burst_ticks = 0U;
+			auto_fire_active = 0U;
 		}
 		else
 		{
 			if (fire_cmd && (last_fire_btn == 0U))
 			{
+				/* 上升沿：先打一发 */
 				stir_target_sum += STIR_STEP_TICKS;
+				fire_hold_ticks = 0U;
+				fire_burst_ticks = 0U;
+				auto_fire_active = 0U;
+			}
+
+			if (fire_cmd)
+			{
+				if (fire_hold_ticks < FIRE_HOLD_START_TICKS)
+				{
+					fire_hold_ticks++;
+				}
+				else
+				{
+					auto_fire_active = 1U;
+				}
+
+				if (auto_fire_active)
+				{
+					if (fire_burst_ticks >= FIRE_BURST_TICKS)
+					{
+						stir_target_sum += STIR_STEP_TICKS;
+						fire_burst_ticks = 0U;
+					}
+					else
+					{
+						fire_burst_ticks++;
+					}
+				}
+			}
+			else
+			{
+				/* 非按下状态每帧锁位：松手/自瞄shoot失效后立即停止拨弹，不执行历史积压目标 */
+				stir_target_sum = stir_pos_sum;
+				last_fire_btn = 0U;
+				fire_hold_ticks = 0U;
+				fire_burst_ticks = 0U;
+				auto_fire_active = 0U;
 			}
 
 			/* para_num=1: position mode target */
 			stir_m->set_target(stir_m, 1, (double)stir_target_sum);
-			last_fire_btn = fire_cmd;
+			if (fire_cmd) {
+				last_fire_btn = 1U;
+			}
 		}
 
 		osDelay(2);

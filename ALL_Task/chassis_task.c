@@ -21,6 +21,15 @@
 #define MOTOR_RPM_TO_VECTOR     3000.0f
 #define CHASSIS_MAX_RAD         60.0f
 
+// 三档速度配置（可按实车手感直接调参）
+#define CHASSIS_SPEED_GEAR_LOW   0.7f
+#define CHASSIS_SPEED_GEAR_MID   1.0f
+#define CHASSIS_SPEED_GEAR_HIGH  1.5f
+
+// 超级电容低压滞回阈值（capacity_voltage 单位：*100）
+#define CAP_VOLT_ENTER_LOW_GEAR  800  // <= 17.00V 强制最低档
+#define CAP_VOLT_EXIT_LOW_GEAR   1500  // >= 18.50V 才允许回中档
+
 // 回正相关参数
 #define YAW_ALIGN_THRESHOLD     0.05f    // 放宽到位阈值（适配机械误差，约2.86度）
 #define WHEEL_ACTIVE_THRESHOLD  0.01f    // 拨轮有效输入阈值
@@ -43,6 +52,7 @@ static uint8_t left_rotate_toggle = 0;   // Q键切换：左旋状态（1=左旋
 static uint8_t right_rotate_toggle = 0;  // E键切换：右旋状态（1=右旋开启）
 static uint8_t last_q_pressed = 0;       // 上一帧 Q 键状态（防抖）
 static uint8_t last_e_pressed = 0;       // 上一帧 E 键状态（防抖）
+static uint8_t cap_low_gear_lock = 0;    // 超级电容低压锁档（滞回）
 
 static float Rad_Format(float angle) {
     while (angle >  (float)M_PI) angle -= 2.0f * (float)M_PI;
@@ -153,7 +163,32 @@ void chassis_task_func(void const * argument) {
                     float vw_rc = (abs(rc->vt13.rc_vt13.wheel) > RC_DEADZONE) ? ((float)rc->vt13.rc_vt13.wheel / 660.0f) : 0.0f;
 
                     float vx_kb = 0.0f, vy_kb = 0.0f, vw_kb = 0.0f;
-                    float speed_ratio = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_SHIFT) ? 0.7f : 0.5f;
+                    float speed_ratio;
+
+                    // 三档仲裁：低压锁最低档 > Shift最高档 > 默认中档
+                    if (robot_ctrl.game_info.online_301) {
+                        int16_t cap_v = robot_ctrl.game_info.capacity_voltage;
+                        if (cap_low_gear_lock) {
+                            if (cap_v >= CAP_VOLT_EXIT_LOW_GEAR) {
+                                cap_low_gear_lock = 0U;
+                            }
+                        } else {
+                            if (cap_v <= CAP_VOLT_ENTER_LOW_GEAR) {
+                                cap_low_gear_lock = 1U;
+                            }
+                        }
+                    } else {
+                        // 无有效电容电压时不强制限速，避免默认0值导致长期锁慢档
+                        cap_low_gear_lock = 0U;
+                    }
+
+                    if (cap_low_gear_lock) {
+                        speed_ratio = CHASSIS_SPEED_GEAR_LOW;
+                    } else if (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_SHIFT)) {
+                        speed_ratio = CHASSIS_SPEED_GEAR_HIGH;
+                    } else {
+                        speed_ratio = CHASSIS_SPEED_GEAR_MID;
+                    }
 
                     if (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_W)) vy_kb += speed_ratio;
                     if (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_S)) vy_kb -= speed_ratio;
