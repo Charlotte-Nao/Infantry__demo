@@ -1,4 +1,4 @@
-#include "auto_aim.h"
+#include "auto_ctrl.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -19,7 +19,7 @@ int auto_aim_init(struct usb_device *usb_dev) {
     return 0;
 }
 
-// 解析目标数据【核心重写：适配 valid,shoot,yaw,pitch\r\n 格式】
+// 解析目标数据：兼容 valid,shoot,yaw,pitch[,vx,vy]\r\n
 int parse_target_data(target_info_t *target) {
     char buffer[100];
     // 接收上位机USB数据，超时200us，长度不变
@@ -52,8 +52,27 @@ int parse_target_data(target_info_t *target) {
         if (!token) return 0;
         target->aim_target_pitch = strtof(token, NULL);
 
-        // 调用校验函数，返回最终有效性 1=有效 0=无效
-        return is_target_valid(target);
+        // 第5/6段：可选解析底盘规划速度 vx/vy（未携带则置零）
+        token = strtok_r(NULL, delim, &rest);
+        if (token) {
+            target->chassis_vx = strtof(token, NULL);
+            token = strtok_r(NULL, delim, &rest);
+            if (token) {
+                target->chassis_vy = strtof(token, NULL);
+                target->chassis_vel_valid = 1U;
+            } else {
+                target->chassis_vx = 0.0f;
+                target->chassis_vy = 0.0f;
+                target->chassis_vel_valid = 0U;
+            }
+        } else {
+            target->chassis_vx = 0.0f;
+            target->chassis_vy = 0.0f;
+            target->chassis_vel_valid = 0U;
+        }
+
+        // 返回语义：报文解析成功
+        return 1;
     }
     // 无接收数据，返回无效
     return 0;

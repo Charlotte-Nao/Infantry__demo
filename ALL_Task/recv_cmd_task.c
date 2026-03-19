@@ -6,7 +6,7 @@
 
 #include "cmsis_os.h"
 #include "../Application/robot_global.h"
-#include "../Application/auto_aim.h"
+#include "../Application/auto_ctrl.h"
 #include "../Bsp/usb_cdc/bsp_usb_cdc.h"
 
 void recv_cmd_task_func(void const * argument)
@@ -30,6 +30,11 @@ void recv_cmd_task_func(void const * argument)
 				robot_ctrl.target_info.shoot = 0;
 				robot_ctrl.target_info.aim_target_yaw = robot_ctrl.gimbal.yaw;
 				robot_ctrl.target_info.aim_target_pitch = robot_ctrl.gimbal.pitch;
+				robot_ctrl.target_info.chassis_vx = 0.0f;
+				robot_ctrl.target_info.chassis_vy = 0.0f;
+				robot_ctrl.target_info.chassis_vel_valid = 0U;
+				robot_ctrl.chassis.cmd_vx = 0.0f;
+				robot_ctrl.chassis.cmd_vy = 0.0f;
 				robot_ctrl.monitor.vision_online = 0;
 				osDelay(10);
 				continue;
@@ -38,7 +43,14 @@ void recv_cmd_task_func(void const * argument)
 
 		if (parse_target_data(&robot_ctrl.target_info) == 1)
 		{
-			robot_ctrl.monitor.vision_online = 1;
+			robot_ctrl.monitor.vision_online = is_target_valid(&robot_ctrl.target_info) ? 1U : 0U;
+			if (robot_ctrl.target_info.chassis_vel_valid) {
+				robot_ctrl.chassis.cmd_vx = robot_ctrl.target_info.chassis_vx;
+				robot_ctrl.chassis.cmd_vy = robot_ctrl.target_info.chassis_vy;
+			} else {
+				robot_ctrl.chassis.cmd_vx = 0.0f;
+				robot_ctrl.chassis.cmd_vy = 0.0f;
+			}
 		}
 		else
 		{
@@ -46,6 +58,11 @@ void recv_cmd_task_func(void const * argument)
 			robot_ctrl.target_info.shoot = 0;
 			robot_ctrl.target_info.aim_target_yaw = robot_ctrl.gimbal.yaw;
 			robot_ctrl.target_info.aim_target_pitch = robot_ctrl.gimbal.pitch;
+			robot_ctrl.target_info.chassis_vx = 0.0f;
+			robot_ctrl.target_info.chassis_vy = 0.0f;
+			robot_ctrl.target_info.chassis_vel_valid = 0U;
+			robot_ctrl.chassis.cmd_vx = 0.0f;
+			robot_ctrl.chassis.cmd_vy = 0.0f;
 			robot_ctrl.monitor.vision_online = 0;
 		}
 

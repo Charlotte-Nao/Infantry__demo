@@ -4,7 +4,7 @@
 #include "struct_typedef.h"
 #include "stdint.h"
 #include "../Components/remote/remote.h"
-#include "../../Application/auto_aim.h"  //【新增】引入自瞄头文件，支持target_info_t结构体
+#include "../../Application/auto_ctrl.h"  //【新增】引入自瞄头文件，支持target_info_t结构体
 
 /* --- 模式枚举定义 --- */
 
@@ -90,6 +90,8 @@ typedef struct {
     // 3. 底盘运动状态 (由 Chassis Task 更新)
     struct {
         fp32 yaw_speed;      // 云台相对于底盘的机械夹角 (由编码器转化)
+        fp32 cmd_vx;         // 上位机规划x速度（正方向：底盘前方）
+        fp32 cmd_vy;         // 上位机规划y速度（正方向：底盘左侧）
     } chassis;
 
     // 4. 系统监控与异常处理

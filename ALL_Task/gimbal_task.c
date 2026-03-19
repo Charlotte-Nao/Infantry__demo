@@ -57,7 +57,9 @@ void gimbal_task_func(void const * argument) {
     const struct motor_device *pit_m = motor_get_device("J4310_PITCH");   // 云台俯仰轴电机 J4310
 
     /**************************************** 【静态状态变量区 - 防抖/状态机/计时专用，无冗余】 ****************************************/
-    static uint8_t last_relax_toggle = 0;    // 云台失能模式按键 上一帧状态 - 按键防抖，防止误触
+    static uint8_t last_pause_cmd = 0;       // pause 上一帧状态（切换）
+    static uint8_t last_enable_cmd = 0;      // C 键上一帧状态（使能）
+    static uint8_t last_disable_cmd = 0;     // X 键上一帧状态（失能）
     static uint8_t last_mode_toggle = 0;     // 云台模式切换按键 上一帧状态 - 按键防抖，防止误触
     static uint8_t last_shoot_on_toggle = 0;    // F 键上一帧状态（起转）
     static uint8_t last_shoot_off_toggle = 0;   // B 键上一帧状态（停转）
@@ -120,15 +122,27 @@ void gimbal_task_func(void const * argument) {
             //     last_sw_state = robot_ctrl.rc->vt13.rc_vt13.sw;     // 更新档位上一帧状态，用于防抖
             // }
             /********************* 云台工作模式切换：失能 ↔ 手动 ↔ 自瞄 *********************/
-            // 云台失能模式触发条件：VT13遥控器暂停键 或 VT13 C键 按下
-            uint8_t relax_cmd = (robot_ctrl.rc->vt13.rc_vt13.pause) || KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_C);
-            uint8_t relax_trigger = (relax_cmd && !last_relax_toggle); // 按键上升沿触发，防抖
+            // 统一失能/使能按键：pause=切换，C=使能，X=失能
+            uint8_t pause_cmd = robot_ctrl.rc->vt13.rc_vt13.pause;
+            uint8_t enable_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_C);
+            uint8_t disable_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_X);
+            uint8_t pause_trigger = (pause_cmd && !last_pause_cmd);
+            uint8_t enable_trigger = (enable_cmd && !last_enable_cmd);
+            uint8_t disable_trigger = (disable_cmd && !last_disable_cmd);
             // 云台模式切换条件：VT13遥控器自定义左按键 或 鼠标右键 按下 (原先为 VT13 G 键)
             uint8_t mode_cmd = (robot_ctrl.rc->vt13.rc_vt13.custom_l) || (robot_ctrl.rc->vt13.mouse_vt13.press_r);
             uint8_t mode_trigger = (mode_cmd && !last_mode_toggle);     // 按键上升沿触发，防抖
 
-            // 触发放松切换：失能 ↔ 手动 互切，同时清零初始化标志位，重连后防甩动
-            if (relax_trigger) {
+            // 优先级：X失能 > C使能 > pause切换
+            if (disable_trigger) {
+                robot_ctrl.gimbal_mode = GIMBAL_RELAX;
+                is_initialized = 0;
+            } else if (enable_trigger) {
+                if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
+                    robot_ctrl.gimbal_mode = GIMBAL_REMOTE;
+                    is_initialized = 0;
+                }
+            } else if (pause_trigger) {
                 robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_RELAX) ? GIMBAL_REMOTE : GIMBAL_RELAX;
                 is_initialized = 0;
             }
@@ -138,7 +152,9 @@ void gimbal_task_func(void const * argument) {
             }
 
             // 更新按键上一帧状态，完成防抖逻辑
-            last_relax_toggle = relax_cmd;
+            last_pause_cmd = pause_cmd;
+            last_enable_cmd = enable_cmd;
+            last_disable_cmd = disable_cmd;
             last_mode_toggle = mode_cmd;
 
             /**************************************** 云台角度闭环控制核心逻辑 ****************************************/

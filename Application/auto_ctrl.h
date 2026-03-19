@@ -11,6 +11,9 @@ typedef struct {
     uint8_t shoot;            // 上位机发射允许标志 1=可发射 0=不可发射
     float aim_target_yaw;     // 云台Yaw目标角度
     float aim_target_pitch;   // 云台Pitch目标角度
+    float chassis_vx;         // 底盘x方向速度指令（正方向：底盘前方）
+    float chassis_vy;         // 底盘y方向速度指令（正方向：底盘左侧）
+    uint8_t chassis_vel_valid;// 本帧是否携带x/y速度字段
 } target_info_t;
 
 // 函数声明（无修改，完全保留）

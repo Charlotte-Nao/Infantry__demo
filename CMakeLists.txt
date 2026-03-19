@@ -52,8 +52,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         Algorithm/MahonyAHRS/MahonyAHRS.c
         Application/mahony.c
         Application/mahony.h
-        Application/auto_aim.c
-        Application/auto_aim.h
+        Application/auto_ctrl.c
+        Application/auto_ctrl.h
         Bsp/usb_cdc/bsp_usb_cdc.c
         Bsp/usb_cdc/bsp_usb_cdc.h
         Components/motor/motor.c
@@ -69,7 +69,7 @@ add_executable(${CMAKE_PROJECT_NAME}
         ALL_Task/chassis_task.h
         ALL_Task/gimbal_task.c
         ALL_Task/gimbal_task.h
-        Application/auto_aim.c
+        Application/auto_ctrl.c
         ALL_Task/recv_cmd_task.c
         ALL_Task/recv_cmd_task.h
         ALL_Task/shoot_task.c

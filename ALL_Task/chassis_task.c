@@ -64,7 +64,9 @@ void chassis_task_func(void const * argument) {
     struct motor_device *yaw_m = motor_get_device("GM6020_YAW");
 
     const RC_ctrl_t *rc = robot_ctrl.rc;
-    static uint8_t last_toggle_cmd = 0;
+    static uint8_t last_pause_cmd = 0;
+    static uint8_t last_enable_cmd = 0;
+    static uint8_t last_disable_cmd = 0;
     float wheel_targets[4] = {0};
 
     /******************************************************************************************************************/
@@ -96,19 +98,36 @@ void chassis_task_func(void const * argument) {
         } else {
             robot_ctrl.monitor.remote_online = 1;
             /**********************************************************************************************************/
-            // 底盘模式切换
-            uint8_t toggle_cmd = (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_CTRL) || rc->vt13.rc_vt13.custom_r);
-            uint8_t toggle_trigger = (toggle_cmd && !last_toggle_cmd);
+            // 统一失能/使能按键：pause=切换，C=使能，X=失能
+            uint8_t pause_cmd = rc->vt13.rc_vt13.pause;
+            uint8_t enable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_C);
+            uint8_t disable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_X);
+            uint8_t pause_trigger = (pause_cmd && !last_pause_cmd);
+            uint8_t enable_trigger = (enable_cmd && !last_enable_cmd);
+            uint8_t disable_trigger = (disable_cmd && !last_disable_cmd);
 
-            if (toggle_trigger) {
+            // 优先级：X失能 > C使能 > pause切换
+            if (disable_trigger) {
+                robot_ctrl.chassis_mode = CHASSIS_RELAX;
+                yaw_align_enable = 0;
+                last_wheel_active = 0;
+                last_qe_active = 0;
+                last_manual_vw = 0.0f;
+                left_rotate_toggle = 0;
+                right_rotate_toggle = 0;
+                last_q_pressed = 0;
+                last_e_pressed = 0;
+            } else if (enable_trigger) {
+                if (robot_ctrl.chassis_mode == CHASSIS_RELAX) {
+                    robot_ctrl.chassis_mode = CHASSIS_FOLLOW;
+                }
+            } else if (pause_trigger) {
                 if (robot_ctrl.chassis_mode != CHASSIS_RELAX) {
                     robot_ctrl.chassis_mode = CHASSIS_RELAX;
-                    // 模式切换为放松时，重置所有标志
                     yaw_align_enable = 0;
                     last_wheel_active = 0;
                     last_qe_active = 0;
                     last_manual_vw = 0.0f;
-                    // 切换到放松时也清除 Q/E 切换态与防抖
                     left_rotate_toggle = 0;
                     right_rotate_toggle = 0;
                     last_q_pressed = 0;
@@ -117,7 +136,10 @@ void chassis_task_func(void const * argument) {
                     robot_ctrl.chassis_mode = CHASSIS_FOLLOW;
                 }
             }
-            last_toggle_cmd = toggle_cmd;
+
+            last_pause_cmd = pause_cmd;
+            last_enable_cmd = enable_cmd;
+            last_disable_cmd = disable_cmd;
         }
 
         /**************************************************************************************************************/
@@ -161,8 +183,12 @@ void chassis_task_func(void const * argument) {
                     last_q_pressed = q_pressed;
                     last_e_pressed = e_pressed;
 
-                    float total_vx = vx_rc + vx_kb;
-                    float total_vy = vy_rc + vy_kb;
+                    // custom_r 按下时，接入上位机路径规划速度（x前、y左）
+                    float vx_plan = rc->vt13.rc_vt13.custom_r ? robot_ctrl.chassis.cmd_vx : 0.0f;
+                    float vy_plan = rc->vt13.rc_vt13.custom_r ? robot_ctrl.chassis.cmd_vy : 0.0f;
+
+                    float total_vx = vx_rc + vx_kb + vx_plan;
+                    float total_vy = vy_rc + vy_kb + vy_plan;
 
                     // --- B. 各向同性限速 ---
                     float v_norm = sqrtf(total_vx * total_vx + total_vy * total_vy);
