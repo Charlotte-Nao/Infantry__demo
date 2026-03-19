@@ -4,7 +4,6 @@
 #include "../Algorithm/MahonyAHRS/MahonyAHRS.h"
 #include "math.h"
 #include "cmsis_os.h"
-#include "../Bsp/usb_cdc/bsp_usb_cdc.h"
 
 // 姿态解算中间变量
 static fp32 INS_q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
@@ -17,13 +16,6 @@ static uint16_t cali_count = 0;
 #define CALI_SAMPLES 1000                       // 校准采样次数 (500ms)
 
 void sensor_task_func(void const * argument) {
-
-    // 与上位机通信USB
-    struct usb_device *Usb = usb_get_device();
-    Usb->Init(Usb);
-
-    struct uart_device* Uart = uart_get_device("uart1_dma");
-    Uart->Init(Uart, 115200, 8, 'N', 1);
 
     // 1. 硬件初始化
     while (BMI088_init() != 0) {
@@ -69,6 +61,10 @@ void sensor_task_func(void const * argument) {
         ins_angle[2] = atan2f(2.0f*(INS_q[0]*INS_q[1]+INS_q[2]*INS_q[3]), 2.0f*(INS_q[0]*INS_q[0]+INS_q[3]*INS_q[3])-1.0f); // Pitch
 
         // 7. 同步到全局变量 (弧度)
+        robot_ctrl.gimbal.q[0] = INS_q[0];
+        robot_ctrl.gimbal.q[1] = INS_q[1];
+        robot_ctrl.gimbal.q[2] = INS_q[2];
+        robot_ctrl.gimbal.q[3] = INS_q[3];
         robot_ctrl.gimbal.yaw   = ins_angle[0];
         robot_ctrl.gimbal.pitch = ins_angle[2];
         robot_ctrl.gimbal.roll  = ins_angle[1];
@@ -77,9 +73,6 @@ void sensor_task_func(void const * argument) {
         robot_ctrl.gimbal.yaw_v   = gyro[2];
         robot_ctrl.gimbal.pitch_v = gyro[1];
 
-        Usb->Print(Usb, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", INS_q[0], INS_q[1], INS_q[2], INS_q[3],robot_ctrl.gimbal.yaw,robot_ctrl.gimbal.pitch);
-
-        //Uart->Print(Uart,"%d\r\n", robot_ctrl.rc->dt7.rc_dt7.ch[0]);
 
         vTaskDelay(1);
     }

@@ -24,6 +24,51 @@ typedef enum {
     SHOOT_READY,         // 摩擦轮起旋
 } shoot_mode_e;
 
+/* --- 电机反馈与在线状态缓存 --- */
+typedef struct {
+    int32_t pos;
+    int32_t vel;
+    int32_t current;
+    int32_t temp;
+    uint32_t last_rx_tick;
+    uint8_t online;
+} motor_runtime_state_t;
+
+typedef struct {
+    motor_runtime_state_t j4310_pitch;
+    motor_runtime_state_t gm6020_yaw;
+    motor_runtime_state_t m2006_trigger;
+    motor_runtime_state_t m3508_shoot_l;
+    motor_runtime_state_t m3508_shoot_r;
+    motor_runtime_state_t m3508_chassis_1;
+    motor_runtime_state_t m3508_chassis_2;
+    motor_runtime_state_t m3508_chassis_3;
+    motor_runtime_state_t m3508_chassis_4;
+} motors_info_t;
+
+/* --- CAN2 对端遥测缓存（来自 0x301/0x302） --- */
+typedef struct {
+    /* 0x301 */
+    uint8_t robot_id;
+    uint8_t game_progress;
+    uint16_t stage_remain_time;
+    uint16_t current_HP;
+    int16_t capacity_voltage;
+
+    /* 0x302 */
+    uint16_t shooter_17mm_barrel_heat;
+    uint8_t armor_id;
+    uint8_t center_bonus_state;
+    uint8_t rfid_supply19;
+    uint8_t rfid_center23;
+
+    /* 状态 */
+    uint32_t last_tick_301;
+    uint32_t last_tick_302;
+    uint8_t online_301;
+    uint8_t online_302;
+} game_info;
+
 /* --- 核心控制结构体 --- */
 
 typedef struct {
@@ -34,6 +79,7 @@ typedef struct {
 
     // 2. 云台姿态反馈数据 (由 Sensor Task 更新)
     struct {
+        fp32 q[4];       // 当前姿态四元数 [w,x,y,z]
         fp32 yaw;        // 当前航向角 (度)
         fp32 pitch;      // 当前俯仰角 (度)
         fp32 roll;       // 当前横滚角 (度)
@@ -58,6 +104,12 @@ typedef struct {
 
     // ==========【新增核心】自瞄视觉数据 - 全局共享 ==========
     target_info_t target_info;   // 上位机下发的自瞄数据(valid,shoot,yaw,pitch)
+
+    // 6. CAN2 对端遥测信息（比赛信息/电容信息）
+    game_info game_info;
+
+    // 7. 本机所有电机反馈与在线状态
+    motors_info_t motors_info;
 
 } robot_ctrl_info_t;
 

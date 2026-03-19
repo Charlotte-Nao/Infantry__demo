@@ -8,7 +8,6 @@
 #include "../../Bsp/uart/bsp_uart.h" // 串口驱动头文件-上位机/外设通信
 #include "../../Bsp/led/bsp_led.h"   // LED驱动头文件-状态指示灯控制【保留灯光 不删除】
 #include "../../Components/remote/remote.h" // 遥控器驱动头文件-遥控数据解析
-#include "../../Application/auto_aim.h"     // 自瞄功能头文件-上位机数据解析
 
 /***********************************************************************************************************************
 * 宏定义-集中管理 【仅保留实际调用的有效宏定义，分区归类+详细注释，无冗余】
@@ -24,17 +23,6 @@
 // ===================== 云台核心限位 【物理机械硬限位，重中之重，严禁修改】 =====================
 #define PITCH_UP_LIMIT      0.35f       // 云台俯仰角 向上最大限位 (弧度制) 防止云台撞上枪管/云台架
 #define PITCH_DOWN_LIMIT    -0.45f      // 云台俯仰角 向下最大限位 (弧度制) 防止云台撞上底盘/发射机构
-
-// ===================== 发射机构-拨弹轮堵转逃逸 核心参数【发射必用，完整保留】 =====================
-#define STIR_REVERSE_CURRENT   8500     // 拨弹轮堵转判定电流阈值(mA) 超过该值判定为卡弹
-#define STIR_BLOCK_TIME        150      // 堵转持续判定时间(ms) 防抖，防止瞬时大电流误判
-#define STIR_REVERSE_TIME      200      // 堵转后反转逃逸时间(ms) 反转退弹，解除卡弹状态
-#define SHOOT_FW_SPEED         6000.0f  // 摩擦轮目标转速 搓弹加速，提供子弹初速度
-#define STIR_SHOOT_SPEED       10000.0f  // 拨弹轮正常发射转速 正向拨弹，送弹入膛
-#define STIR_REVERSE_SPEED     2500.0f  // 拨弹轮堵转反转转速 低速反转，防止退弹过猛二次卡弹
-
-// ===================== 自瞄开火新增宏定义 =====================
-#define AUTO_SHOOT_TRIGGER_CNT 2        // 自瞄开火触发阈值：连续读到shoot==1的次数
 
 /***********************************************************************************************************************
 * 函数名：Rad_Format
@@ -67,27 +55,13 @@ void gimbal_task_func(void const * argument) {
     // 获取所有电机设备句柄 - 绑定对应电机，通过句柄调用电机驱动接口
     const struct motor_device *yaw_m = motor_get_device("GM6020_YAW");    // 云台航向轴电机 GM6020
     const struct motor_device *pit_m = motor_get_device("J4310_PITCH");   // 云台俯仰轴电机 J4310
-    struct motor_device *shoot_l = motor_get_device("M3508_SHOOT_L");     // 左摩擦轮电机 M3508
-    struct motor_device *shoot_r = motor_get_device("M3508_SHOOT_R");     // 右摩擦轮电机 M3508
-    struct motor_device *stir_m  = motor_get_device("M2006_TRIGGER");     // 拨弹轮电机 M2006
-
-    // 自瞄功能初始化：获取USB句柄+初始化USB，用于接收上位机(视觉)数据
-    struct usb_device* usb = usb_get_device();
-    usb->Init(usb);
-    auto_aim_init(usb);
 
     /**************************************** 【静态状态变量区 - 防抖/状态机/计时专用，无冗余】 ****************************************/
     static uint8_t last_relax_toggle = 0;    // 云台失能模式按键 上一帧状态 - 按键防抖，防止误触
     static uint8_t last_mode_toggle = 0;     // 云台模式切换按键 上一帧状态 - 按键防抖，防止误触
-    static uint8_t last_shoot_toggle = 0;       // 发射命令 上一帧状态 - 用于自瞄连续开火计数
+    static uint8_t last_shoot_on_toggle = 0;    // F 键上一帧状态（起转）
+    static uint8_t last_shoot_off_toggle = 0;   // B 键上一帧状态（停转）
     static uint8_t is_initialized = 0;       // 云台初始化标志位 0-未初始化 1-已初始化 防止上电瞬间角度突变甩动
-    // 拨弹轮状态机枚举：正常发射/堵转判定中/反转逃逸中 三段式状态机，卡弹处理核心逻辑
-    static enum { STIR_NORMAL, STIR_BLOCKING, STIR_REVERSING } stir_state = STIR_NORMAL;
-    static uint32_t block_start_tick = 0;    // 堵转开始时刻系统滴答值 - 用于累计堵转时间
-    static uint32_t reverse_end_tick = 0;    // 反转结束时刻系统滴答值 - 用于控制反转时长
-    // ===================== 新增：自瞄连续开火计数 =====================
-    static uint8_t auto_shoot_count = 0;     // 自瞄模式下连续读到shoot==1的次数
-
     float world_yaw_target = 0.0f;           // 云台世界坐标系 航向角目标值 (弧度)
     float world_pit_target = 0.0f;           // 云台世界坐标系 俯仰角目标值 (弧度)
 
@@ -107,12 +81,7 @@ void gimbal_task_func(void const * argument) {
             robot_ctrl.gimbal_mode = GIMBAL_RELAX;       // 云台强制进入失能模式，无动力
             robot_ctrl.shoot_mode = SHOOT_STOP;          // 发射机构强制停止，所有发射电机归零
             is_initialized = 0;                          // 云台初始化标志位清零，重连后重新初始化
-            auto_shoot_count = 0;                        // 新增：掉线时清零自瞄开火计数
 
-            // 掉线急停核心动作：所有发射电机零速指令，防止失控发射
-            shoot_l->set_target(shoot_l, 1, 0);
-            shoot_r->set_target(shoot_r, 1, 0);
-            stir_m->set_target(stir_m, 1, 0);
 
             // 指示灯反馈：遥控器掉线 → 红灯闪烁 (全局最高优先级，其他状态被覆盖)
             LED_GREEN_RESET(); LED_BLUE_RESET(); LED_RED_Toggle();
@@ -122,16 +91,28 @@ void gimbal_task_func(void const * argument) {
         else {
             robot_ctrl.monitor.remote_online = 1;  // 置位遥控器在线标志位
 
-            /********************* 发射模式切换：F按键/遥控器档位 双路切换 *********************/
-            // VT13 F键按下且防抖：发射就绪 ↔ 发射停止 切换
-            /* KEY_VT13_F is 0x0200 (uint16_t). If we assign the raw bitmask directly to a uint8_t
-               it will be truncated to 0. Convert to a 0/1 boolean explicitly to avoid this bug. */
-            uint8_t shoot_ready_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_F);
-            uint8_t shoot_trigger = (shoot_ready_cmd && !last_shoot_toggle);     // 按键上升沿触发，防抖
-            if (shoot_trigger) {
-                robot_ctrl.shoot_mode = (robot_ctrl.shoot_mode == SHOOT_STOP) ? SHOOT_READY : SHOOT_STOP;
+            /********************* 发射模式仲裁：S强制起转，C强制停转，N听键盘 *********************/
+            uint8_t shoot_on_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_F);
+            uint8_t shoot_off_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_B);
+            uint8_t shoot_on_trigger = (shoot_on_cmd && !last_shoot_on_toggle);
+            uint8_t shoot_off_trigger = (shoot_off_cmd && !last_shoot_off_toggle);
+            uint8_t sw = robot_ctrl.rc->vt13.rc_vt13.sw;
+
+            if (sw == RC_SW_S_VT13) {
+                robot_ctrl.shoot_mode = SHOOT_READY;
+            } else if (sw == RC_SW_C_VT13) {
+                robot_ctrl.shoot_mode = SHOOT_STOP;
+            } else { /* N档：由键盘控制 */
+                if (shoot_on_trigger) {
+                    robot_ctrl.shoot_mode = SHOOT_READY;
+                }
+                if (shoot_off_trigger) {
+                    robot_ctrl.shoot_mode = SHOOT_STOP;
+                }
             }
-            last_shoot_toggle = shoot_ready_cmd; // 更新发射按键上一帧状态，用于防抖
+
+            last_shoot_on_toggle = shoot_on_cmd;
+            last_shoot_off_toggle = shoot_off_cmd;
 
             // // VT13遥控器档位切换：S档(发射档) ↔ 其他档 切换，优先级与F键一致
             // if (robot_ctrl.rc->vt13.rc_vt13.sw != last_sw_state) {
@@ -150,12 +131,10 @@ void gimbal_task_func(void const * argument) {
             if (relax_trigger) {
                 robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_RELAX) ? GIMBAL_REMOTE : GIMBAL_RELAX;
                 is_initialized = 0;
-                auto_shoot_count = 0;                            // 新增：切换模式时清零自瞄开火计数
             }
             // 触发模式切换：手动 ↔ 自瞄 互切，仅在云台使能状态下有效
             if (mode_trigger && robot_ctrl.gimbal_mode != GIMBAL_RELAX) {
                 robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_REMOTE) ? GIMBAL_AUTO : GIMBAL_REMOTE;
-                auto_shoot_count = 0;                            // 新增：切换模式时清零自瞄开火计数
             }
 
             // 更新按键上一帧状态，完成防抖逻辑
@@ -194,8 +173,8 @@ void gimbal_task_func(void const * argument) {
 
                 /********************* 模式2：云台自瞄控制【核心优化】解析全局自瞄数据，视觉闭环 *********************/
                 else if (robot_ctrl.gimbal_mode == GIMBAL_AUTO) {
-                    // 解析上位机视觉数据到全局结构体 robot_ctrl.target_info，返回1=有目标，0=丢目标
-                    if (parse_target_data(&robot_ctrl.target_info) == 1) {
+                    // com_task 已完成视觉数据解析，这里只消费 target_info
+                    if (robot_ctrl.target_info.valid == 1) {
                         // 指示灯反馈：自瞄模式+有目标 → 蓝灯常亮
                         LED_RED_RESET(); LED_GREEN_RESET(); LED_BLUE_SET();
                         // 直接赋值视觉解算后的目标角度，云台跟随目标
@@ -205,21 +184,9 @@ void gimbal_task_func(void const * argument) {
                         if(world_pit_target > PITCH_UP_LIMIT)  world_pit_target = PITCH_UP_LIMIT;
                         if(world_pit_target < PITCH_DOWN_LIMIT)world_pit_target = PITCH_DOWN_LIMIT;
 
-                        // ===================== 新增：自瞄连续shoot计数逻辑 =====================
-                        if (robot_ctrl.target_info.shoot == 1) {
-                            // 连续读到shoot==1，计数加1（最多到阈值，防止溢出）
-                            if (auto_shoot_count < AUTO_SHOOT_TRIGGER_CNT) {
-                                auto_shoot_count++;
-                            }
-                        } else {
-                            // shoot==0，直接清零计数
-                            auto_shoot_count = 0;
-                        }
                     } else {
                         // 指示灯反馈：自瞄模式+丢目标 → 蓝灯闪烁
                         LED_RED_RESET(); LED_BLUE_Toggle(); LED_GREEN_RESET();
-                        robot_ctrl.target_info.shoot = 0;  // 丢目标强制停止发射，防止盲射
-                        auto_shoot_count = 0;                // 新增：丢目标清零计数
                     }
                 }
 
@@ -246,7 +213,6 @@ void gimbal_task_func(void const * argument) {
             else if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
                 // 指示灯反馈：云台失能 → 红灯常亮
                 LED_GREEN_RESET(); LED_BLUE_RESET(); LED_RED_SET();
-                auto_shoot_count = 0;                        // 新增：失能模式清零自瞄开火计数
             }
 
             //调试用：
@@ -255,73 +221,6 @@ void gimbal_task_func(void const * argument) {
             //Uart->Print(Uart, "%d,%f\r\n", yaw_speed, robot_ctrl.chassis.yaw_speed); // 调试打印航向角目标值，单位：mrad
             //Uart->Print(Uart, "%f,%f\r\n", robot_ctrl.gimbal.yaw, world_yaw_target); // 调试打印航向角目标值，单位：mrad
 
-            /**************************************** 发射机构完整控制逻辑 ****************************************/
-            /********************* 1.摩擦轮转速控制 - 左右轮反向旋转，搓弹加速 *********************/
-            if (robot_ctrl.shoot_mode == SHOOT_READY) {  // 发射就绪状态
-                // 左右摩擦轮反向定速转动，搓弹加速
-                shoot_l->set_target(shoot_l, 1,  SHOOT_FW_SPEED);
-                shoot_r->set_target(shoot_r, 1, -SHOOT_FW_SPEED);
-            } else {  // 发射停止状态，摩擦轮零速，停止搓弹
-                shoot_l->set_target(shoot_l, 1, 0);
-                shoot_r->set_target(shoot_r, 1, 0);
-            }
-
-            /********************* 2.拨弹轮控制 + 堵转逃逸保护 + 分模式精准开火逻辑【核心完整版】 *********************/
-            float stir_torque = 0;
-            stir_m->get_status(stir_m, "CURRENT", &stir_torque);  // 获取拨弹轮电机当前电流，用于堵转检测
-            uint8_t shoot_cmd = 0;                                // 最终开火指令 0-不开火 1-开火
-            // VT13拨弹轮手动反转指令：鼠标中键/遥控器C档，用于手动退弹/解除卡弹
-            uint8_t reverse_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_m || robot_ctrl.rc->vt13.rc_vt13.sw == RC_SW_C_VT13);
-
-            // ========== 核心开火判定逻辑【分模式精准控制，防误射】 ==========
-            if(robot_ctrl.gimbal_mode == GIMBAL_REMOTE)
-            {
-                // 手动模式开火条件：VT13鼠标左键/遥控器扳机 按下 + 发射就绪 → 无额外限制，直接开火
-                shoot_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_l || robot_ctrl.rc->vt13.rc_vt13.trigger) && (robot_ctrl.shoot_mode == SHOOT_READY);
-            }
-            else if(robot_ctrl.gimbal_mode == GIMBAL_AUTO)
-            {
-                // ===================== 修改：自瞄模式开火条件 =====================
-                // 自瞄模式开火条件：遥控器触发 + 发射就绪 + 连续3次shoot==1
-                shoot_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_l || robot_ctrl.rc->vt13.rc_vt13.trigger)
-                          && (robot_ctrl.shoot_mode == SHOOT_READY)
-                          && (auto_shoot_count >= AUTO_SHOOT_TRIGGER_CNT);
-            }
-
-            // ========== 拨弹轮三段式状态机：正常发射 → 堵转判定 → 反转逃逸 【完整保留】 ==========
-            if (reverse_cmd) {  // 手动反转指令优先：强制反转退弹
-                stir_m->set_target(stir_m, 1, STIR_REVERSE_SPEED);
-                stir_state = STIR_NORMAL;  // 强制恢复正常状态
-                auto_shoot_count = 0;        // 新增：手动反转清零自瞄开火计数
-            }
-            else if (shoot_cmd) {  // 满足开火条件，进入发射/堵转处理逻辑
-                if (stir_state == STIR_REVERSING) {  // 处于反转逃逸中
-                    stir_m->set_target(stir_m, 1, 2500);
-                    if (current_tick > reverse_end_tick) stir_state = STIR_NORMAL;
-                }
-                else {  // 处于正常发射状态
-                    stir_m->set_target(stir_m, 1, -STIR_SHOOT_SPEED); // 反向拨弹送弹入膛
-
-                    // 堵转检测逻辑：电流超过阈值 且 电流值有效，防止误判
-                    if (fabsf(stir_torque) > STIR_REVERSE_CURRENT && fabsf(stir_torque) < 30000) {
-                        if (stir_state == STIR_NORMAL) {  // 首次检测到堵转，开始计时
-                            stir_state = STIR_BLOCKING;
-                            block_start_tick = current_tick;
-                        }
-                        else if (current_tick - block_start_tick > STIR_BLOCK_TIME) {  // 堵转持续达标，触发反转
-                            stir_state = STIR_REVERSING;
-                            reverse_end_tick = current_tick + STIR_REVERSE_TIME;
-                        }
-                    }
-                    else {  // 电流正常，恢复正常发射状态
-                        stir_state = STIR_NORMAL;
-                    }
-                }
-            }
-            else {  // 无开火指令，拨弹轮零速停止
-                stir_m->set_target(stir_m, 1, 0);
-                stir_state = STIR_NORMAL;
-            }
         }
         osDelay(2);  // 云台任务调度周期 2ms，固定频率保证控制精度
     }

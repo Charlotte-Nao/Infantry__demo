@@ -14,6 +14,7 @@ struct motor_device {
     uint32_t motor_id;              /*!< 反馈帧对应的 StdId (大疆: 0x201+; 达妙: 0x00) */
     CAN_HandleTypeDef* motor_can_handle; /*!< 电机挂载的 CAN 句柄 */
     void *motor_data;               /*!< 指向私有数据结构体 (如 DM_MIT_data, M3508_data) */
+    uint32_t last_rx_tick;          /*!< 最近一次收到反馈帧的系统 tick */
 
     // --- 函数指针接口 ---
 
@@ -118,6 +119,9 @@ void DJI_Motor_Send_CAN1_Group(CAN_HandleTypeDef *hcan);
  * @brief 将 CAN2 总线上所有大疆电机的电流控制指令打包发送
  */
 void DJI_Motor_Send_CAN2_Group(CAN_HandleTypeDef *hcan);
+
+uint32_t Motor_Get_Count(void);
+extern struct motor_device *motor_list[];
 
 // 硬件句柄声明
 extern CAN_HandleTypeDef hcan1;

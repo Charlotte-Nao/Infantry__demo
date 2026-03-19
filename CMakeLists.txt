@@ -70,6 +70,12 @@ add_executable(${CMAKE_PROJECT_NAME}
         ALL_Task/gimbal_task.c
         ALL_Task/gimbal_task.h
         Application/auto_aim.c
+        ALL_Task/recv_cmd_task.c
+        ALL_Task/recv_cmd_task.h
+        ALL_Task/shoot_task.c
+        ALL_Task/shoot_task.h
+        ALL_Task/send_info_task.c
+        ALL_Task/send_info_task.h
 )
 
 # Add STM32CubeMX generated sources

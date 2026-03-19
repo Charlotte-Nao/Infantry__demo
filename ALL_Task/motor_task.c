@@ -4,6 +4,98 @@
 #include "../Application/robot_global.h"
 #include "stdio.h"
 
+#define MOTOR_OFFLINE_TIMEOUT_MS 100U
+
+static void SyncM3508State(motor_runtime_state_t *dst, struct motor_device *m, uint32_t now)
+{
+    int16_t pos = 0, vel = 0, current = 0;
+    int8_t temp = 0;
+    uint32_t dt;
+
+    if (dst == NULL || m == NULL) return;
+
+    m->get_status(m, "POS", &pos);
+    m->get_status(m, "VEL", &vel);
+    m->get_status(m, "CURRENT", &current);
+    m->get_status(m, "TEMP", &temp);
+
+    dst->pos = pos;
+    dst->vel = vel;
+    dst->current = current;
+    dst->temp = temp;
+    dst->last_rx_tick = m->last_rx_tick;
+
+    dt = now - m->last_rx_tick;
+    dst->online = (m->last_rx_tick != 0U && dt <= MOTOR_OFFLINE_TIMEOUT_MS) ? 1U : 0U;
+}
+
+static void SyncM2006State(motor_runtime_state_t *dst, struct motor_device *m, uint32_t now)
+{
+    int32_t pos_sum = 0;
+    int16_t vel = 0, current = 0;
+    int8_t temp = 0;
+    uint32_t dt;
+
+    if (dst == NULL || m == NULL) return;
+
+    m->get_status(m, "POS_SUM", &pos_sum);
+    m->get_status(m, "VEL", &vel);
+    m->get_status(m, "CURRENT", &current);
+    m->get_status(m, "TEMP", &temp);
+
+    dst->pos = pos_sum;
+    dst->vel = vel;
+    dst->current = current;
+    dst->temp = temp;
+    dst->last_rx_tick = m->last_rx_tick;
+
+    dt = now - m->last_rx_tick;
+    dst->online = (m->last_rx_tick != 0U && dt <= MOTOR_OFFLINE_TIMEOUT_MS) ? 1U : 0U;
+}
+
+static void SyncGM6020State(motor_runtime_state_t *dst, struct motor_device *m, uint32_t now)
+{
+    float pos_rad = 0.0f;
+    int16_t vel = 0;
+    uint32_t dt;
+
+    if (dst == NULL || m == NULL) return;
+
+    m->get_status(m, "POS", &pos_rad);
+    m->get_status(m, "VEL", &vel);
+
+    dst->pos = (int32_t)(pos_rad * 10000.0f);
+    dst->vel = vel;
+    dst->current = 0;
+    dst->temp = 0;
+    dst->last_rx_tick = m->last_rx_tick;
+
+    dt = now - m->last_rx_tick;
+    dst->online = (m->last_rx_tick != 0U && dt <= MOTOR_OFFLINE_TIMEOUT_MS) ? 1U : 0U;
+}
+
+static void SyncJ4310State(motor_runtime_state_t *dst, struct motor_device *m, uint32_t now)
+{
+    float pos = 0.0f, vel = 0.0f;
+    int8_t temp_mos = 0;
+    uint32_t dt;
+
+    if (dst == NULL || m == NULL) return;
+
+    m->get_status(m, "POS", &pos);
+    m->get_status(m, "VEL", &vel);
+    m->get_status(m, "TEMP_MOS", &temp_mos);
+
+    dst->pos = (int32_t)(pos * 10000.0f);
+    dst->vel = (int32_t)(vel * 100.0f);
+    dst->current = 0;
+    dst->temp = temp_mos;
+    dst->last_rx_tick = m->last_rx_tick;
+
+    dt = now - m->last_rx_tick;
+    dst->online = (m->last_rx_tick != 0U && dt <= MOTOR_OFFLINE_TIMEOUT_MS) ? 1U : 0U;
+}
+
 /**
  * @brief 电机任务执行函数
  * @note  优先级：High (1ms)
@@ -32,6 +124,7 @@ void motor_task_func(void const * argument) {
     static shoot_mode_e   last_shoot_mode   = SHOOT_STOP;
 
     while (1) {
+        uint32_t now = osKernelSysTick();
         /* --- A. 边缘触发：云台使能控制 --- */
         if (robot_ctrl.gimbal_mode != last_gimbal_mode) {
             if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
@@ -81,6 +174,17 @@ void motor_task_func(void const * argument) {
 
         // 达妙电机（Pitch轴）使用专用协议帧发送
         if(pitch) pitch->send_ctrl_cmd(pitch);
+
+        /* --- E. 同步全部电机反馈到全局（含在线状态） --- */
+        if (pitch)   SyncJ4310State(&robot_ctrl.motors_info.j4310_pitch, pitch, now);
+        if (yaw)     SyncGM6020State(&robot_ctrl.motors_info.gm6020_yaw, yaw, now);
+        if (stir_m)  SyncM2006State(&robot_ctrl.motors_info.m2006_trigger, stir_m, now);
+        if (shoot_l) SyncM3508State(&robot_ctrl.motors_info.m3508_shoot_l, shoot_l, now);
+        if (shoot_r) SyncM3508State(&robot_ctrl.motors_info.m3508_shoot_r, shoot_r, now);
+        if (chassis[0]) SyncM3508State(&robot_ctrl.motors_info.m3508_chassis_1, chassis[0], now);
+        if (chassis[1]) SyncM3508State(&robot_ctrl.motors_info.m3508_chassis_2, chassis[1], now);
+        if (chassis[2]) SyncM3508State(&robot_ctrl.motors_info.m3508_chassis_3, chassis[2], now);
+        if (chassis[3]) SyncM3508State(&robot_ctrl.motors_info.m3508_chassis_4, chassis[3], now);
 
         osDelay(1);
     }

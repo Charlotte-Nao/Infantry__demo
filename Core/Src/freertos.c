@@ -51,6 +51,9 @@ osThreadId sensor_taskHandle;
 osThreadId motor_taskHandle;
 osThreadId gimbal_taskHandle;
 osThreadId chassis_taskHandle;
+osThreadId recv_cmd_taskHandle;
+osThreadId shoot_taskHandle;
+osThreadId send_info_taskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -62,6 +65,9 @@ extern void sensor_task_func(void const * argument);
 extern void motor_task_func(void const * argument);
 extern void gimbal_task_func(void const * argument);
 extern void chassis_task_func(void const * argument);
+extern void recv_cmd_task_func(void const * argument);
+extern void shoot_task_func(void const * argument);
+extern void send_info_task_func(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -114,7 +120,7 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* definition and creation of sensor_task */
-  osThreadDef(sensor_task, sensor_task_func, osPriorityHigh, 0, 512);
+  osThreadDef(sensor_task, sensor_task_func, osPriorityHigh, 0, 128);
   sensor_taskHandle = osThreadCreate(osThread(sensor_task), NULL);
 
   /* definition and creation of motor_task */
@@ -122,12 +128,24 @@ void MX_FREERTOS_Init(void) {
   motor_taskHandle = osThreadCreate(osThread(motor_task), NULL);
 
   /* definition and creation of gimbal_task */
-  osThreadDef(gimbal_task, gimbal_task_func, osPriorityAboveNormal, 0, 1024);
+  osThreadDef(gimbal_task, gimbal_task_func, osPriorityAboveNormal, 0, 512);
   gimbal_taskHandle = osThreadCreate(osThread(gimbal_task), NULL);
 
   /* definition and creation of chassis_task */
   osThreadDef(chassis_task, chassis_task_func, osPriorityAboveNormal, 0, 512);
   chassis_taskHandle = osThreadCreate(osThread(chassis_task), NULL);
+
+  /* definition and creation of recv_cmd_task */
+  osThreadDef(recv_cmd_task, recv_cmd_task_func, osPriorityBelowNormal, 0, 512);
+  recv_cmd_taskHandle = osThreadCreate(osThread(recv_cmd_task), NULL);
+
+  /* definition and creation of shoot_task */
+  osThreadDef(shoot_task, shoot_task_func, osPriorityAboveNormal, 0, 512);
+  shoot_taskHandle = osThreadCreate(osThread(shoot_task), NULL);
+
+  /* definition and creation of send_info_task */
+  osThreadDef(send_info_task, send_info_task_func, osPriorityRealtime, 0, 512);
+  send_info_taskHandle = osThreadCreate(osThread(send_info_task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

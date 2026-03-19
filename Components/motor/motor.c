@@ -10,6 +10,7 @@
 #include "math.h"
 #include "cmsis_os.h"
 #include "../../Bsp/LED/bsp_LED.h"
+#include "../../Application/robot_global.h"
 
 #define pi (fp32)M_PI
 
@@ -640,6 +641,19 @@ struct M2006_data {
     float _last_d_out;
     float _d_filter_alpha;
 
+    // 位置环（外环）
+    float _kp_pos;
+    float _ki_pos;
+    float _i_term_pos;
+    float _v_des_limit;
+    int32_t _pos_deadband;
+
+    // 多圈位置跟踪（编码器累积）
+    int32_t _p_des_sum;
+    int32_t _pos_sum;
+    int16_t _last_pos_raw;
+    uint8_t _pos_inited;
+
     // 反馈量
     int16_t POS;
     int16_t VEL;
@@ -653,7 +667,30 @@ struct M2006_data {
 
     //使能状态
     uint8_t enable_flag;
+
+    // 控制模式：0=位置环，1=速度环
+    uint8_t ctrl_mode;
 };
+
+static void M2006_UpdatePosSum(struct M2006_data *d, int16_t pos_raw)
+{
+    if (d == NULL) return;
+
+    if (d->_pos_inited == 0U) {
+        d->_last_pos_raw = pos_raw;
+        d->_pos_sum = pos_raw;
+        d->_p_des_sum = d->_pos_sum;
+        d->_pos_inited = 1U;
+        return;
+    }
+
+    int32_t delta = (int32_t)pos_raw - (int32_t)d->_last_pos_raw;
+    if (delta > 4096) delta -= 8192;
+    if (delta < -4096) delta += 8192;
+
+    d->_pos_sum += delta;
+    d->_last_pos_raw = pos_raw;
+}
 
 /* M2006 初始化 */
 void M2006_VEL_PID_init(struct motor_device *motor, uint32_t motor_ID, CAN_HandleTypeDef *hcan, int para_num, ...)
@@ -670,6 +707,11 @@ void M2006_VEL_PID_init(struct motor_device *motor, uint32_t motor_ID, CAN_Handl
     d->_current_output_max = 500.0f;
     d->_i_output_max = 500.0f;
     d->_d_filter_alpha = 1.0f;
+    d->_kp_pos = 1.0f;
+    d->_ki_pos = 0.0f;
+    d->_v_des_limit = 6000.0f;
+    d->_pos_deadband = 12;
+    d->ctrl_mode = 0U;
 
     if (para_num > 0) {
         va_list ap;
@@ -695,6 +737,8 @@ void M2006_get_measure(const struct motor_device *motor, const uint8_t *data)
     d->CURRENT = (int16_t)((uint16_t)data[4] << 8 | (uint16_t)data[5]);
     d->TEMP = (int8_t)data[6];
     d->ERR = (int8_t)data[7];
+
+    M2006_UpdatePosSum(d, d->POS);
 }
 
 void M2006_enable(struct motor_device *motor) {
@@ -707,7 +751,11 @@ void M2006_disable(struct motor_device *motor) {
     struct M2006_data *d = (struct M2006_data *)motor->motor_data;
     d->enable_flag = 0;
     d->_i_term = 0.0f;
+    d->_i_term_pos = 0.0f;
     d->_current_output = 0;
+    d->_v_des = 0;
+    d->ctrl_mode = 0U;
+    d->_p_des_sum = d->_pos_sum;
 }
 
 void M2006_VEL_PID_update(struct motor_device *motor) {
@@ -718,6 +766,24 @@ void M2006_VEL_PID_update(struct motor_device *motor) {
         d->_i_term = 0.0f;
         d->_current_output = 0;
         return;
+    }
+
+    if (d->ctrl_mode == 0U) {
+        int32_t pos_err = d->_p_des_sum - d->_pos_sum;
+
+        if (pos_err > d->_pos_deadband || pos_err < -d->_pos_deadband) {
+            d->_i_term_pos += d->_ki_pos * (float)pos_err;
+            if (d->_i_term_pos > d->_v_des_limit) d->_i_term_pos = d->_v_des_limit;
+            if (d->_i_term_pos < -d->_v_des_limit) d->_i_term_pos = -d->_v_des_limit;
+
+            float v_cmd = d->_kp_pos * (float)pos_err + d->_i_term_pos;
+            if (v_cmd > d->_v_des_limit) v_cmd = d->_v_des_limit;
+            if (v_cmd < -d->_v_des_limit) v_cmd = -d->_v_des_limit;
+            d->_v_des = (int16_t)v_cmd;
+        } else {
+            d->_v_des = 0;
+            d->_i_term_pos = 0.0f;
+        }
     }
 
     int16_t error = d->_v_des - d->VEL;
@@ -748,7 +814,19 @@ void M2006_VEL_PID_set_target(const struct motor_device *motor, const int para_n
 
     va_list ap;
     va_start(ap, para_num);
-    if (para_num >= 1) d->_v_des = (int16_t)va_arg(ap, double);
+    if (para_num >= 2) {
+        const double v_des = va_arg(ap, double);
+        const double mode = va_arg(ap, double);
+        d->_v_des = (int16_t)v_des;
+        d->ctrl_mode = (mode != 0.0) ? 1U : 0U;
+        if (d->ctrl_mode == 0U) {
+            d->_p_des_sum = d->_pos_sum;
+        }
+    } else if (para_num >= 1) {
+        const double p_des = va_arg(ap, double);
+        d->_p_des_sum = (int32_t)p_des;
+        d->ctrl_mode = 0U;
+    }
     va_end(ap);
 }
 
@@ -760,12 +838,19 @@ void M2006_VEL_PID_get_status(const struct motor_device *motor, const char* whic
     if (strcmp(which_status, "POS") == 0) *(int16_t *)status_data = d->POS;
     else if (strcmp(which_status, "VEL") == 0) *(int16_t *)status_data = d->VEL;
     else if (strcmp(which_status, "CURRENT") == 0) *(int16_t *)status_data = d->CURRENT;
+    else if (strcmp(which_status, "POS_SUM") == 0) *(int32_t *)status_data = d->_pos_sum;
     else if (strcmp(which_status, "TEMP") == 0) *(int8_t *)status_data = d->TEMP;
     else if (strcmp(which_status, "ERR") == 0) *(int8_t *)status_data = d->ERR;
     else if (strcmp(which_status, "v_des") == 0) *(int16_t *)status_data = d->_v_des;
+    else if (strcmp(which_status, "p_des_sum") == 0) *(int32_t *)status_data = d->_p_des_sum;
+    else if (strcmp(which_status, "mode") == 0) *(uint8_t *)status_data = d->ctrl_mode;
     else if (strcmp(which_status, "Kp") == 0) *(float *)status_data = d->_kp;
     else if (strcmp(which_status, "Ki") == 0) *(float *)status_data = d->_ki;
     else if (strcmp(which_status, "Kd") == 0) *(float *)status_data = d->_kd;
+    else if (strcmp(which_status, "Kp_pos") == 0) *(float *)status_data = d->_kp_pos;
+    else if (strcmp(which_status, "Ki_pos") == 0) *(float *)status_data = d->_ki_pos;
+    else if (strcmp(which_status, "v_des_limit") == 0) *(float *)status_data = d->_v_des_limit;
+    else if (strcmp(which_status, "pos_deadband") == 0) *(int32_t *)status_data = d->_pos_deadband;
     else if (strcmp(which_status, "current_max") == 0) *(float *)status_data = d->_current_output_max;
     else if (strcmp(which_status, "i_max") == 0) *(float *)status_data = d->_i_output_max;
     else if (strcmp(which_status, "alpha") == 0) *(float *)status_data = d->_d_filter_alpha;
@@ -779,6 +864,10 @@ void M2006_VEL_PID_set_para(const struct motor_device *motor, const char* which_
     if (strcmp(which_para, "Kp") == 0) d->_kp = *(float *)para_data;
     else if (strcmp(which_para, "Ki") == 0) d->_ki = *(float *)para_data;
     else if (strcmp(which_para, "Kd") == 0) d->_kd = *(float *)para_data;
+    else if (strcmp(which_para, "Kp_pos") == 0) d->_kp_pos = *(float *)para_data;
+    else if (strcmp(which_para, "Ki_pos") == 0) d->_ki_pos = *(float *)para_data;
+    else if (strcmp(which_para, "v_des_limit") == 0) d->_v_des_limit = *(float *)para_data;
+    else if (strcmp(which_para, "pos_deadband") == 0) d->_pos_deadband = *(int32_t *)para_data;
     else if (strcmp(which_para, "current_max") == 0) d->_current_output_max = *(float *)para_data;
     else if (strcmp(which_para, "i_max") == 0) {
         d->_i_output_max = *(float *)para_data;
@@ -1251,6 +1340,11 @@ struct motor_device *motor_get_device(const char *name)
     return NULL;
 }
 
+uint32_t Motor_Get_Count(void)
+{
+    return (uint32_t)MOTOR_COUNT;
+}
+
 /**********************************************************************************************************************/
 /* 私有内部逻辑 */
 
@@ -1331,8 +1425,13 @@ static void Motor_Internal_Sync(void) {
         } else if (strstr(m->motor_name, "J4310")) {
             struct DM_MIT_data *d = (struct DM_MIT_data *)m->motor_data;
             d->_p_des = 0; d->_v_des = 0; d->_t_ff = 0;
+        } else if (strstr(m->motor_name, "M2006")) {
+            struct M2006_data *d = (struct M2006_data *)m->motor_data;
+            d->_v_des = 0;
+            d->_p_des_sum = d->_pos_sum;
+            d->ctrl_mode = 0U;
         } else {
-            // M3508 / M2006
+            // M3508
             struct M3508_data *d = (struct M3508_data *)m->motor_data;
             d->_v_des = 0;
         }
@@ -1478,6 +1577,31 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
     // 获取 CAN 消息
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK) return;
 
+    /* --- 解析来自对端单片机的比赛/电容信息（CAN1: 0x301/0x302） --- */
+    if (hcan == &hcan1) {
+        if (rx_header.StdId == 0x301U) {
+            robot_ctrl.game_info.robot_id = rx_data[0];
+            robot_ctrl.game_info.game_progress = rx_data[1];
+            robot_ctrl.game_info.stage_remain_time = (uint16_t)rx_data[2] | ((uint16_t)rx_data[3] << 8);
+            robot_ctrl.game_info.current_HP = (uint16_t)rx_data[4] | ((uint16_t)rx_data[5] << 8);
+            robot_ctrl.game_info.capacity_voltage = (int16_t)((uint16_t)rx_data[6] | ((uint16_t)rx_data[7] << 8));
+            robot_ctrl.game_info.last_tick_301 = osKernelSysTick();
+            robot_ctrl.game_info.online_301 = 1U;
+            return;
+        }
+
+        if (rx_header.StdId == 0x302U) {
+            robot_ctrl.game_info.shooter_17mm_barrel_heat = (uint16_t)rx_data[0] | ((uint16_t)rx_data[1] << 8);
+            robot_ctrl.game_info.armor_id = (uint8_t)(rx_data[2] & 0x0FU);
+            robot_ctrl.game_info.center_bonus_state = (uint8_t)(rx_data[3] & 0x03U);
+            robot_ctrl.game_info.rfid_supply19 = (uint8_t)(rx_data[4] & 0x01U);
+            robot_ctrl.game_info.rfid_center23 = (uint8_t)(rx_data[5] & 0x01U);
+            robot_ctrl.game_info.last_tick_302 = osKernelSysTick();
+            robot_ctrl.game_info.online_302 = 1U;
+            return;
+        }
+    }
+
     /* --- 处理 CAN2 总线 (达妙 + 发射机构) --- */
     if (hcan == &hcan2) {
         // 1. 达妙电机反馈 (达妙反馈 ID 通常为 0x00，内部通过 Data[0] 区分 ID)
@@ -1486,6 +1610,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
             // 校验反馈帧中的 ID 是否匹配实例 ID
             if (dm && (rx_data[0] & 0x0F) == dm->motor_id) {
                 dm->get_measure(dm, rx_data);
+                dm->last_rx_tick = osKernelSysTick();
             }
         }
         // 2. 大疆电机反馈 (Shoot_L/R 挂在 CAN2, ID 为 0x201/0x202)
@@ -1495,6 +1620,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
                     motor_list[i]->motor_id == rx_header.StdId &&
                     motor_list[i]->motor_can_handle == &hcan2) {
                     motor_list[i]->get_measure(motor_list[i], rx_data);
+                    motor_list[i]->last_rx_tick = osKernelSysTick();
                     break;
                     }
             }
@@ -1511,6 +1637,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
                     motor_list[i]->motor_id == rx_header.StdId &&
                     motor_list[i]->motor_can_handle == &hcan1) {
                     motor_list[i]->get_measure(motor_list[i], rx_data);
+                    motor_list[i]->last_rx_tick = osKernelSysTick();
                     break;
                     }
             }
