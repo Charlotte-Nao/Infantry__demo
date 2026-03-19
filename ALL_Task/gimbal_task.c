@@ -5,7 +5,6 @@
 #include "stdlib.h"               // 标准库头文件-通用工具函数
 #include "cmsis_os.h"             // RTOS系统头文件-系统滴答/延时/任务调度
 #include "stdio.h"                // 标准输入输出-调试打印备用
-#include "../../Bsp/uart/bsp_uart.h" // 串口驱动头文件-上位机/外设通信
 #include "../../Bsp/led/bsp_led.h"   // LED驱动头文件-状态指示灯控制【保留灯光 不删除】
 #include "../../Components/remote/remote.h" // 遥控器驱动头文件-遥控数据解析
 
@@ -48,18 +47,11 @@ static float Rad_Format(float angle) {
 ***********************************************************************************************************************/
 void gimbal_task_func(void const * argument) {
     /**************************************** 【硬件外设初始化区】 ****************************************/
-    // 获取串口1 DMA句柄并初始化：波特率115200、8位数据位、无校验、1位停止位
-    struct uart_device* Uart = uart_get_device("uart1_dma");
-    Uart->Init(Uart, 115200, 8, 'N', 1);
-
     // 获取所有电机设备句柄 - 绑定对应电机，通过句柄调用电机驱动接口
     const struct motor_device *yaw_m = motor_get_device("GM6020_YAW");    // 云台航向轴电机 GM6020
     const struct motor_device *pit_m = motor_get_device("J4310_PITCH");   // 云台俯仰轴电机 J4310
 
     /**************************************** 【静态状态变量区 - 防抖/状态机/计时专用，无冗余】 ****************************************/
-    static uint8_t last_pause_cmd = 0;       // pause 上一帧状态（切换）
-    static uint8_t last_enable_cmd = 0;      // C 键上一帧状态（使能）
-    static uint8_t last_disable_cmd = 0;     // X 键上一帧状态（失能）
     static uint8_t last_mode_toggle = 0;     // 云台模式切换按键 上一帧状态 - 按键防抖，防止误触
     static uint8_t last_shoot_on_toggle = 0;    // F 键上一帧状态（起转）
     static uint8_t last_shoot_off_toggle = 0;   // B 键上一帧状态（停转）
@@ -78,8 +70,10 @@ void gimbal_task_func(void const * argument) {
 
         /**************************************** 【最高优先级】VT13遥控器掉线全局急停保护 ****************************************/
         // 遥控器超时判定：超过200ms未收到VT13遥控器数据，判定为遥控器掉线/失联
-        if (current_tick - robot_ctrl.rc->vt13.last_update_tick > 200) {
+        if (current_tick - robot_ctrl.rc->vt13.last_update_tick > 1000) {
             robot_ctrl.monitor.remote_online = 0;        // 置位遥控器离线标志位
+            robot_ctrl.monitor.system_enabled = 0;       // 统一使能拉低，避免云台/底盘状态分叉
+            robot_ctrl.monitor.plan_enabled = 0;
             robot_ctrl.gimbal_mode = GIMBAL_RELAX;       // 云台强制进入失能模式，无动力
             robot_ctrl.shoot_mode = SHOOT_STOP;          // 发射机构强制停止，所有发射电机归零
             is_initialized = 0;                          // 云台初始化标志位清零，重连后重新初始化
@@ -121,40 +115,27 @@ void gimbal_task_func(void const * argument) {
             //     robot_ctrl.shoot_mode = (robot_ctrl.rc->vt13.rc_vt13.sw == RC_SW_S_VT13) ? SHOOT_READY : SHOOT_STOP;
             //     last_sw_state = robot_ctrl.rc->vt13.rc_vt13.sw;     // 更新档位上一帧状态，用于防抖
             // }
-            /********************* 云台工作模式切换：失能 ↔ 手动 ↔ 自瞄 *********************/
-            // 统一失能/使能按键：pause=切换，C=使能，X=失能
-            uint8_t pause_cmd = robot_ctrl.rc->vt13.rc_vt13.pause;
-            uint8_t enable_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_C);
-            uint8_t disable_cmd = KEY_PRESSED(robot_ctrl.rc->vt13.key_vt13.v, KEY_VT13_X);
-            uint8_t pause_trigger = (pause_cmd && !last_pause_cmd);
-            uint8_t enable_trigger = (enable_cmd && !last_enable_cmd);
-            uint8_t disable_trigger = (disable_cmd && !last_disable_cmd);
+            /********************* 云台工作模式：读取统一使能状态，避免与底盘各自切换产生不同步 *********************/
             // 云台模式切换条件：VT13遥控器自定义左按键 或 鼠标右键 按下 (原先为 VT13 G 键)
             uint8_t mode_cmd = (robot_ctrl.rc->vt13.rc_vt13.custom_l) || (robot_ctrl.rc->vt13.mouse_vt13.press_r);
             uint8_t mode_trigger = (mode_cmd && !last_mode_toggle);     // 按键上升沿触发，防抖
 
-            // 优先级：X失能 > C使能 > pause切换
-            if (disable_trigger) {
+            if (!robot_ctrl.monitor.system_enabled) {
                 robot_ctrl.gimbal_mode = GIMBAL_RELAX;
                 is_initialized = 0;
-            } else if (enable_trigger) {
+            } else {
                 if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
                     robot_ctrl.gimbal_mode = GIMBAL_REMOTE;
                     is_initialized = 0;
                 }
-            } else if (pause_trigger) {
-                robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_RELAX) ? GIMBAL_REMOTE : GIMBAL_RELAX;
-                is_initialized = 0;
-            }
-            // 触发模式切换：手动 ↔ 自瞄 互切，仅在云台使能状态下有效
-            if (mode_trigger && robot_ctrl.gimbal_mode != GIMBAL_RELAX) {
-                robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_REMOTE) ? GIMBAL_AUTO : GIMBAL_REMOTE;
+
+                // 触发模式切换：手动 ↔ 自瞄 互切，仅在云台使能状态下有效
+                if (mode_trigger) {
+                    robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_REMOTE) ? GIMBAL_AUTO : GIMBAL_REMOTE;
+                }
             }
 
             // 更新按键上一帧状态，完成防抖逻辑
-            last_pause_cmd = pause_cmd;
-            last_enable_cmd = enable_cmd;
-            last_disable_cmd = disable_cmd;
             last_mode_toggle = mode_cmd;
 
             /**************************************** 云台角度闭环控制核心逻辑 ****************************************/
@@ -190,7 +171,9 @@ void gimbal_task_func(void const * argument) {
                 /********************* 模式2：云台自瞄控制【核心优化】解析全局自瞄数据，视觉闭环 *********************/
                 else if (robot_ctrl.gimbal_mode == GIMBAL_AUTO) {
                     // com_task 已完成视觉数据解析，这里只消费 target_info
-                    if (robot_ctrl.target_info.valid == 1) {
+                    if (robot_ctrl.monitor.vision_online == 1U &&
+                        isfinite(robot_ctrl.target_info.aim_target_yaw) &&
+                        isfinite(robot_ctrl.target_info.aim_target_pitch)) {
                         // 指示灯反馈：自瞄模式+有目标 → 蓝灯常亮
                         LED_RED_RESET(); LED_GREEN_RESET(); LED_BLUE_SET();
                         // 直接赋值视觉解算后的目标角度，云台跟随目标

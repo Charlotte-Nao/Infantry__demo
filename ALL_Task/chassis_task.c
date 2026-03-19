@@ -22,9 +22,9 @@
 #define CHASSIS_MAX_RAD         60.0f
 
 // 三档速度配置（可按实车手感直接调参）
-#define CHASSIS_SPEED_GEAR_LOW   0.7f
-#define CHASSIS_SPEED_GEAR_MID   1.0f
-#define CHASSIS_SPEED_GEAR_HIGH  1.5f
+#define CHASSIS_SPEED_GEAR_LOW   0.5f
+#define CHASSIS_SPEED_GEAR_MID   0.5f
+#define CHASSIS_SPEED_GEAR_HIGH  0.5f
 
 // 超级电容低压滞回阈值（capacity_voltage 单位：*100）
 #define CAP_VOLT_ENTER_LOW_GEAR  800  // <= 8.00V 强制最低档
@@ -53,6 +53,7 @@ static uint8_t right_rotate_toggle = 0;  // E键切换：右旋状态（1=右旋
 static uint8_t last_q_pressed = 0;       // 上一帧 Q 键状态（防抖）
 static uint8_t last_e_pressed = 0;       // 上一帧 E 键状态（防抖）
 static uint8_t cap_low_gear_lock = 0;    // 超级电容低压锁档（滞回）
+static uint8_t last_custom_r_pressed = 0;// 上一帧 custom_r 状态（路径规划开关防抖）
 
 static float Rad_Format(float angle) {
     while (angle >  (float)M_PI) angle -= 2.0f * (float)M_PI;
@@ -63,8 +64,6 @@ static float Rad_Format(float angle) {
 void chassis_task_func(void const * argument) {
     /******************************************************************************************************************/
     /* 初始化 */
-    struct uart_device* Uart = uart_get_device("uart1_dma");
-    Uart->Init(Uart, 115200, 8, 'N', 1);
 
     struct motor_device *chassis[4];
     for(int i=0; i<4; i++) {
@@ -91,8 +90,10 @@ void chassis_task_func(void const * argument) {
 
         /**************************************************************************************************************/
         // 遥控器掉线检测
-        if (current_tick - rc->vt13.last_update_tick > 200) {
+        if (current_tick - rc->vt13.last_update_tick > 1000) {
             robot_ctrl.monitor.remote_online = 0;
+            robot_ctrl.monitor.system_enabled = 0;
+            robot_ctrl.monitor.plan_enabled = 0;
             robot_ctrl.chassis_mode = CHASSIS_RELAX;
 
             // 掉线时重置所有标志和保存的速度
@@ -105,6 +106,7 @@ void chassis_task_func(void const * argument) {
             right_rotate_toggle = 0;
             last_q_pressed = 0;
             last_e_pressed = 0;
+            last_custom_r_pressed = 0;
         } else {
             robot_ctrl.monitor.remote_online = 1;
             /**********************************************************************************************************/
@@ -116,9 +118,18 @@ void chassis_task_func(void const * argument) {
             uint8_t enable_trigger = (enable_cmd && !last_enable_cmd);
             uint8_t disable_trigger = (disable_cmd && !last_disable_cmd);
 
+            uint8_t prev_system_enabled = robot_ctrl.monitor.system_enabled;
+
             // 优先级：X失能 > C使能 > pause切换
             if (disable_trigger) {
-                robot_ctrl.chassis_mode = CHASSIS_RELAX;
+                robot_ctrl.monitor.system_enabled = 0;
+            } else if (enable_trigger) {
+                robot_ctrl.monitor.system_enabled = 1;
+            } else if (pause_trigger) {
+                robot_ctrl.monitor.system_enabled ^= 1U;
+            }
+
+            if (!robot_ctrl.monitor.system_enabled && prev_system_enabled) {
                 yaw_align_enable = 0;
                 last_wheel_active = 0;
                 last_qe_active = 0;
@@ -127,29 +138,22 @@ void chassis_task_func(void const * argument) {
                 right_rotate_toggle = 0;
                 last_q_pressed = 0;
                 last_e_pressed = 0;
-            } else if (enable_trigger) {
-                if (robot_ctrl.chassis_mode == CHASSIS_RELAX) {
-                    robot_ctrl.chassis_mode = CHASSIS_FOLLOW;
-                }
-            } else if (pause_trigger) {
-                if (robot_ctrl.chassis_mode != CHASSIS_RELAX) {
-                    robot_ctrl.chassis_mode = CHASSIS_RELAX;
-                    yaw_align_enable = 0;
-                    last_wheel_active = 0;
-                    last_qe_active = 0;
-                    last_manual_vw = 0.0f;
-                    left_rotate_toggle = 0;
-                    right_rotate_toggle = 0;
-                    last_q_pressed = 0;
-                    last_e_pressed = 0;
-                } else {
-                    robot_ctrl.chassis_mode = CHASSIS_FOLLOW;
-                }
+                robot_ctrl.monitor.plan_enabled = 0;
+                last_custom_r_pressed = 0;
             }
+
+            robot_ctrl.chassis_mode = robot_ctrl.monitor.system_enabled ? CHASSIS_FOLLOW : CHASSIS_RELAX;
 
             last_pause_cmd = pause_cmd;
             last_enable_cmd = enable_cmd;
             last_disable_cmd = disable_cmd;
+
+            // custom_r 由“按住生效”改为“上升沿切换生效”
+            uint8_t custom_r_pressed = rc->vt13.rc_vt13.custom_r ? 1U : 0U;
+            if (custom_r_pressed && !last_custom_r_pressed && robot_ctrl.monitor.system_enabled) {
+                robot_ctrl.monitor.plan_enabled ^= 1U;
+            }
+            last_custom_r_pressed = custom_r_pressed;
         }
 
         /**************************************************************************************************************/
@@ -218,12 +222,12 @@ void chassis_task_func(void const * argument) {
                     last_q_pressed = q_pressed;
                     last_e_pressed = e_pressed;
 
-                    // custom_r 按下时，接入上位机路径规划速度（x前、y左）
-                    float vx_plan = rc->vt13.rc_vt13.custom_r ? robot_ctrl.chassis.cmd_vx : 0.0f;
-                    float vy_plan = rc->vt13.rc_vt13.custom_r ? robot_ctrl.chassis.cmd_vy : 0.0f;
+                    // 路径规划速度采用切换开关，避免必须持续按住 custom_r
+                    float vx_plan = robot_ctrl.monitor.plan_enabled ? robot_ctrl.chassis.cmd_vx : 0.0f;
+                    float vy_plan = robot_ctrl.monitor.plan_enabled ? robot_ctrl.chassis.cmd_vy : 0.0f;
 
-                    float total_vx = vx_rc + vx_kb + vx_plan;
-                    float total_vy = vy_rc + vy_kb + vy_plan;
+                    float total_vx = vx_rc + vx_kb - vy_plan;
+                    float total_vy = vy_rc + vy_kb + vx_plan;
 
                     // --- B. 各向同性限速 ---
                     float v_norm = sqrtf(total_vx * total_vx + total_vy * total_vy);

@@ -99,6 +99,8 @@ typedef struct {
         uint8_t  sensor_ready;   // 传感器校准完成标志
         uint8_t  remote_online;  // 遥控器在线标志
         uint8_t  vision_online;  // 视觉系统在线标志
+        uint8_t  system_enabled; // 统一使能状态（1=云台/底盘使能，0=全部失能）
+        uint8_t  plan_enabled;   // 底盘路径规划输入开关（custom_r上升沿切换）
     } monitor;
 
     // 5. 输入引用指针

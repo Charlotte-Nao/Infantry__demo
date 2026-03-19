@@ -25,4 +25,6 @@ void Robot_Global_Init(void) {
     // 状态标志显式初始化
     robot_ctrl.monitor.sensor_ready = 0;
     robot_ctrl.monitor.remote_online = 0;
+    robot_ctrl.monitor.system_enabled = 0;
+    robot_ctrl.monitor.plan_enabled = 0;
 }
