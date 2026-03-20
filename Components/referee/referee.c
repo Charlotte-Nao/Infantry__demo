@@ -4,6 +4,7 @@
 
 #include "referee.h"
 #include "usart.h"
+#include "cmsis_os.h"
 #include <string.h>
 
 #include "../../Bsp/LED/bsp_LED.h"
@@ -165,8 +166,11 @@ static void Referee_Data_Parse(uint8_t *p_frame, uint16_t len)
             break;
             
         case CMD_ID_POWER_HEAT_DATA:
-            if (data_len >= sizeof(power_heat_data_t))
+            if (data_len >= sizeof(power_heat_data_t)) {
                 memcpy(&referee_game_info.power_heat_data, data_ptr, sizeof(power_heat_data_t));
+                referee_game_info.power_heat_last_update_tick = osKernelSysTick();
+                referee_game_info.power_heat_update_count++;
+            }
             break;
             
         case CMD_ID_HURT_DATA:

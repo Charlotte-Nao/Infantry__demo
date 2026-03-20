@@ -19,5 +19,6 @@
 
 void SendInfo_Init(void);
 void SendInfo_CAN2_Periodic(void);
+void SendInfo_GetTxDiag(uint32_t *ok_cnt, uint32_t *fail_cnt);
 
 #endif //INFANTRY_01_SEND_INFO_H

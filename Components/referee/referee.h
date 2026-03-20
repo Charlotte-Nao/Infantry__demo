@@ -407,7 +407,11 @@ typedef struct game_info_t
     
     /* === RFID 增益点状态 === */
     rfid_status_t rfid_status;                      /**< RFID 增益点状态 (协议 0x0209) */
-    
+
+    /* === 诊断信息（用于排查热量不更新） === */
+    uint32_t power_heat_last_update_tick;           /**< 0x0202 最近一次成功解析时刻(ms) */
+    uint32_t power_heat_update_count;               /**< 0x0202 成功解析计数 */
+
 } game_info_t;
 
 /* --- 函数声明 --- */

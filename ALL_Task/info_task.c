@@ -11,6 +11,11 @@
 #include "../Components/super_capacitor/super_capacitor.h"
 #include "../Application/send_info/send_info.h"
 
+#define HEAT_LOG_PERIOD_MS         50U
+#define HEAT_STALE_TIMEOUT_MS      300U
+#define CAN_TX_LOG_PERIOD_MS       200U
+#define HEAT_LOG_ENABLE            0U
+
 void info_task_func(void const * argument) {
 
     struct uart_device* Uart = uart_get_device("uart1_dma");
@@ -21,8 +26,85 @@ void info_task_func(void const * argument) {
 
     SendInfo_Init();
 
+    uint16_t last_heat = 0xFFFFU;
+    uint32_t last_log_tick = 0U;
+    uint32_t last_heat_update_count = 0U;
+    uint8_t heat_stale_reported = 0U;
+    uint32_t last_can_log_tick = 0U;
+    uint32_t last_tx_ok = 0U;
+    uint32_t last_tx_fail = 0U;
+
     while (1) {
+        uint32_t now = osKernelSysTick();
         SendInfo_CAN2_Periodic();
+
+        if ((now - last_can_log_tick) >= CAN_TX_LOG_PERIOD_MS)
+        {
+            uint32_t tx_ok = 0U;
+            uint32_t tx_fail = 0U;
+            SendInfo_GetTxDiag(&tx_ok, &tx_fail);
+
+            Uart->Print(Uart,
+                        "[CAN2TX] t=%lu ok=%lu fail=%lu d_ok=%ld d_fail=%ld\r\n",
+                        (unsigned long)now,
+                        (unsigned long)tx_ok,
+                        (unsigned long)tx_fail,
+                        (long)(tx_ok - last_tx_ok),
+                        (long)(tx_fail - last_tx_fail));
+
+            last_tx_ok = tx_ok;
+            last_tx_fail = tx_fail;
+            last_can_log_tick = now;
+        }
+
+
+        if (global_info.referee != NULL)
+        {
+            uint16_t heat = global_info.referee->power_heat_data.shooter_17mm_barrel_heat;
+            uint32_t heat_tick = global_info.referee->power_heat_last_update_tick;
+            uint32_t heat_cnt = global_info.referee->power_heat_update_count;
+            uint32_t heat_age = now - heat_tick;
+
+            if ((heat != last_heat) || (heat_cnt != last_heat_update_count) || ((now - last_log_tick) >= HEAT_LOG_PERIOD_MS))
+            {
+                if (HEAT_LOG_ENABLE) {
+                    Uart->Print(Uart,
+                                "[HEAT] t=%lu v=%u age=%lu cnt=%lu\r\n",
+                                (unsigned long)now,
+                                (unsigned int)heat,
+                                (unsigned long)heat_age,
+                                (unsigned long)heat_cnt);
+                }
+                last_heat = heat;
+                last_heat_update_count = heat_cnt;
+                last_log_tick = now;
+            }
+
+            if ((heat_age > HEAT_STALE_TIMEOUT_MS) && (heat_stale_reported == 0U))
+            {
+                if (HEAT_LOG_ENABLE) {
+                    Uart->Print(Uart,
+                                "[HEAT][STALE] t=%lu age=%lu last=%u cnt=%lu\r\n",
+                                (unsigned long)now,
+                                (unsigned long)heat_age,
+                                (unsigned int)heat,
+                                (unsigned long)heat_cnt);
+                }
+                heat_stale_reported = 1U;
+            }
+            else if ((heat_age <= HEAT_STALE_TIMEOUT_MS) && (heat_stale_reported != 0U))
+            {
+                if (HEAT_LOG_ENABLE) {
+                    Uart->Print(Uart,
+                                "[HEAT][RECOVER] t=%lu age=%lu v=%u cnt=%lu\r\n",
+                                (unsigned long)now,
+                                (unsigned long)heat_age,
+                                (unsigned int)heat,
+                                (unsigned long)heat_cnt);
+                }
+                heat_stale_reported = 0U;
+            }
+        }
 
         //uint16_t temp = global_info.super_cap->temperature;
         //uint16_t cap_v = global_info.super_cap->capacity_voltage;

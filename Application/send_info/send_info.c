@@ -8,6 +8,8 @@
 
 static uint32_t s_last_match_tick;
 static uint32_t s_last_telemetry_tick;
+static uint32_t s_tx_ok_cnt;
+static uint32_t s_tx_fail_cnt;
 
 static uint8_t SendInfo_CAN2_Send(uint32_t std_id, const uint8_t data[8])
 {
@@ -20,13 +22,36 @@ static uint8_t SendInfo_CAN2_Send(uint32_t std_id, const uint8_t data[8])
     tx_header.DLC = 8U;
     tx_header.TransmitGlobalTime = DISABLE;
 
-    return (HAL_CAN_AddTxMessage(&hcan2, &tx_header, (uint8_t *)data, &mailbox) == HAL_OK) ? 1U : 0U;
+    if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan2) == 0U) {
+        s_tx_fail_cnt++;
+        return 0U;
+    }
+
+    if (HAL_CAN_AddTxMessage(&hcan2, &tx_header, (uint8_t *)data, &mailbox) == HAL_OK) {
+        s_tx_ok_cnt++;
+        return 1U;
+    }
+
+    s_tx_fail_cnt++;
+    return 0U;
 }
 
 void SendInfo_Init(void)
 {
     s_last_match_tick = 0U;
     s_last_telemetry_tick = 0U;
+    s_tx_ok_cnt = 0U;
+    s_tx_fail_cnt = 0U;
+}
+
+void SendInfo_GetTxDiag(uint32_t *ok_cnt, uint32_t *fail_cnt)
+{
+    if (ok_cnt != NULL) {
+        *ok_cnt = s_tx_ok_cnt;
+    }
+    if (fail_cnt != NULL) {
+        *fail_cnt = s_tx_fail_cnt;
+    }
 }
 
 void SendInfo_CAN2_Periodic(void)
