@@ -10,12 +10,12 @@
 /* 500Hz shoot control parameters */
 #define SHOOT_FW_SPEED         6000.0f
 #define STIR_REVERSE_SPEED     2500.0f
-#define SHOOT_HEAT_LIMIT_17MM  200U
+#define SHOOT_HEAT_LIMIT_17MM  30U
 #define SHOOT_TASK_PERIOD_MS   2U
 
 /* 长按连发参数：先单发，再按住一段时间进入连发 */
 #define FIRE_HOLD_START_MS     180U
-#define FIRE_BURST_INTERVAL_MS 60U
+#define FIRE_BURST_INTERVAL_MS 30U
 #define FIRE_HOLD_START_TICKS  (FIRE_HOLD_START_MS / SHOOT_TASK_PERIOD_MS)
 #define FIRE_BURST_TICKS       (FIRE_BURST_INTERVAL_MS / SHOOT_TASK_PERIOD_MS)
 
@@ -78,7 +78,7 @@ void shoot_task_func(void const * argument)
 
 		/* C 档用于强制停转，不再作为拨弹反转触发。 */
 		reverse_cmd = robot_ctrl.rc->vt13.mouse_vt13.press_m;
-		heat_block = (robot_ctrl.game_info.shooter_17mm_barrel_heat > SHOOT_HEAT_LIMIT_17MM) ? 1U : 0U;
+		heat_block = (robot_ctrl.game_info.shooter_17mm_barrel_heat >= SHOOT_HEAT_LIMIT_17MM) ? 1U : 0U;
 		fw_offline_block = (robot_ctrl.motors_info.m3508_shoot_l.online == 0U ||
 							robot_ctrl.motors_info.m3508_shoot_r.online == 0U) ? 1U : 0U;
 		feed_block = (heat_block != 0U || fw_offline_block != 0U) ? 1U : 0U;

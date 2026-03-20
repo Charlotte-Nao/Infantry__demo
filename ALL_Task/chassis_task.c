@@ -23,13 +23,13 @@
 #define CHASSIS_MAX_RAD         60.0f
 
 // 三档速度配置（可按实车手感直接调参）
-#define CHASSIS_SPEED_GEAR_LOW   0.5f
-#define CHASSIS_SPEED_GEAR_MID   0.5f
-#define CHASSIS_SPEED_GEAR_HIGH  0.5f
+#define CHASSIS_SPEED_GEAR_LOW   0.7f
+#define CHASSIS_SPEED_GEAR_MID   1.0f
+#define CHASSIS_SPEED_GEAR_HIGH  1.5f
 
 // 超级电容低压滞回阈值（capacity_voltage 单位：*100）
-#define CAP_VOLT_ENTER_LOW_GEAR  800  // <= 8.00V 强制最低档
-#define CAP_VOLT_EXIT_LOW_GEAR   1500  // >= 15.00V 才允许回中档
+#define CAP_VOLT_ENTER_LOW_GEAR  1500  // <= 8.00V 强制最低档
+#define CAP_VOLT_EXIT_LOW_GEAR   2000  // >= 15.00V 才允许回中档
 
 // 回正相关参数
 #define YAW_ALIGN_THRESHOLD     0.05f    // 放宽到位阈值（适配机械误差，约2.86度）
@@ -59,6 +59,9 @@ static uint8_t last_custom_r_pressed = 0;// 上一帧 custom_r 状态（路径�
 static struct uart_device *log_uart = NULL;
 
 #define LOG_PRINT(...) do { if (log_uart != NULL) { log_uart->Print(log_uart, __VA_ARGS__); } } while (0)
+#define CHASSIS_VERBOSE_LOG          0U
+#define CHASSIS_STATE_LOG_PERIOD_MS  30U
+#define LOG_VERBOSE_PRINT(...) do { if (CHASSIS_VERBOSE_LOG) { LOG_PRINT(__VA_ARGS__); } } while (0)
 
 static float Rad_Format(float angle) {
     while (angle >  (float)M_PI) angle -= 2.0f * (float)M_PI;
@@ -121,10 +124,10 @@ void chassis_task_func(void const * argument) {
             last_custom_r_pressed = 0;
 
             if (last_remote_online != 0U) {
-                LOG_PRINT("[CHS][TIMEOUT] t=%lu last_rc=%lu dt=%ld\r\n",
-                          (unsigned long)current_tick,
-                          (unsigned long)rc_last_tick,
-                          (long)rc_tick_diff);
+                LOG_VERBOSE_PRINT("[CHS][TIMEOUT] t=%lu last_rc=%lu dt=%ld\r\n",
+                                  (unsigned long)current_tick,
+                                  (unsigned long)rc_last_tick,
+                                  (long)rc_tick_diff);
             }
         } else {
             robot_ctrl.monitor.remote_online = 1;
@@ -149,15 +152,15 @@ void chassis_task_func(void const * argument) {
             }
 
             if (robot_ctrl.monitor.system_enabled != prev_system_enabled) {
-                LOG_PRINT("[CHS][SYS_EN] t=%lu %u->%u trig(x/c/p)=%u/%u/%u key=0x%04X pause=%u\r\n",
-                          (unsigned long)current_tick,
-                          (unsigned int)prev_system_enabled,
-                          (unsigned int)robot_ctrl.monitor.system_enabled,
-                          (unsigned int)disable_trigger,
-                          (unsigned int)enable_trigger,
-                          (unsigned int)pause_trigger,
-                          (unsigned int)rc->vt13.key_vt13.v,
-                          (unsigned int)pause_cmd);
+                LOG_VERBOSE_PRINT("[CHS][SYS_EN] t=%lu %u->%u trig(x/c/p)=%u/%u/%u key=0x%04X pause=%u\r\n",
+                                  (unsigned long)current_tick,
+                                  (unsigned int)prev_system_enabled,
+                                  (unsigned int)robot_ctrl.monitor.system_enabled,
+                                  (unsigned int)disable_trigger,
+                                  (unsigned int)enable_trigger,
+                                  (unsigned int)pause_trigger,
+                                  (unsigned int)rc->vt13.key_vt13.v,
+                                  (unsigned int)pause_cmd);
             }
 
             if (!robot_ctrl.monitor.system_enabled && prev_system_enabled) {
@@ -183,34 +186,37 @@ void chassis_task_func(void const * argument) {
             uint8_t custom_r_pressed = rc->vt13.rc_vt13.custom_r ? 1U : 0U;
             if (custom_r_pressed && !last_custom_r_pressed && robot_ctrl.monitor.system_enabled) {
                 robot_ctrl.monitor.plan_enabled ^= 1U;
-                LOG_PRINT("[CHS][PLAN] t=%lu plan=%u\r\n",
-                          (unsigned long)current_tick,
-                          (unsigned int)robot_ctrl.monitor.plan_enabled);
+                LOG_VERBOSE_PRINT("[CHS][PLAN] t=%lu plan=%u\r\n",
+                                  (unsigned long)current_tick,
+                                  (unsigned int)robot_ctrl.monitor.plan_enabled);
             }
             last_custom_r_pressed = custom_r_pressed;
         }
 
         if (last_remote_online != robot_ctrl.monitor.remote_online) {
-            LOG_PRINT("[CHS][REMOTE] t=%lu online=%u\r\n",
-                      (unsigned long)current_tick,
-                      (unsigned int)robot_ctrl.monitor.remote_online);
+            LOG_VERBOSE_PRINT("[CHS][REMOTE] t=%lu online=%u\r\n",
+                              (unsigned long)current_tick,
+                              (unsigned int)robot_ctrl.monitor.remote_online);
             last_remote_online = robot_ctrl.monitor.remote_online;
         }
 
-        if ((uint32_t)(current_tick - last_diag_tick) >= 1000U) {
+        if ((uint32_t)(current_tick - last_diag_tick) >= CHASSIS_STATE_LOG_PERIOD_MS) {
             uint32_t ok_cnt = 0U, bad_len_cnt = 0U;
             RC_Get_VT13_RxDiag(&ok_cnt, &bad_len_cnt);
             // 心跳也基于快照差值，避免并发读写造成显示为 0xFFFFFFFF
             uint32_t hb_last_tick = rc->vt13.last_update_tick;
             int32_t hb_tick_diff = (int32_t)(current_tick - hb_last_tick);
-            LOG_PRINT("[CHS][HB] t=%lu remote=%u sys=%u plan=%u rc_dt=%lu rx_ok=%lu rx_bad=%lu\r\n",
-                      (unsigned long)current_tick,
-                      (unsigned int)robot_ctrl.monitor.remote_online,
-                      (unsigned int)robot_ctrl.monitor.system_enabled,
-                      (unsigned int)robot_ctrl.monitor.plan_enabled,
-                      (unsigned long)((hb_tick_diff >= 0) ? hb_tick_diff : 0),
-                      (unsigned long)ok_cnt,
-                      (unsigned long)bad_len_cnt);
+            LOG_VERBOSE_PRINT("[CHS][HB] t=%lu remote=%u sys=%u plan=%u rc_dt=%lu rx_ok=%lu rx_bad=%lu\r\n",
+                              (unsigned long)current_tick,
+                              (unsigned int)robot_ctrl.monitor.remote_online,
+                              (unsigned int)robot_ctrl.monitor.system_enabled,
+                              (unsigned int)robot_ctrl.monitor.plan_enabled,
+                              (unsigned long)((hb_tick_diff >= 0) ? hb_tick_diff : 0),
+                              (unsigned long)ok_cnt,
+                              (unsigned long)bad_len_cnt);
+
+            LOG_PRINT("[CHS][STATE] heat17=%u\r\n",
+                      (unsigned int)robot_ctrl.game_info.shooter_17mm_barrel_heat);
             last_diag_tick = current_tick;
         }
 

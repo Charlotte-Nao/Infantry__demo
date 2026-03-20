@@ -24,6 +24,7 @@ typedef enum {
     SHOOT_READY,         // 摩擦轮起旋
 } shoot_mode_e;
 
+
 /* --- 电机反馈与在线状态缓存 --- */
 typedef struct {
     int32_t pos;
