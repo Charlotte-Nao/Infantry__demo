@@ -101,9 +101,9 @@ void shoot_task_func(void const * argument)
 		}
 		else if (robot_ctrl.gimbal_mode == GIMBAL_AUTO)
 		{
-			fire_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_l || robot_ctrl.rc->vt13.rc_vt13.trigger)
+			/* Auto-aim: upper computer shoot flag directly controls feeding. */
+			fire_cmd = (robot_ctrl.target_info.shoot == 1U)
 					 && (robot_ctrl.shoot_mode == SHOOT_READY)
-					 && (robot_ctrl.target_info.shoot == 1U)
 					 && (feed_block == 0U);
 		}
 
