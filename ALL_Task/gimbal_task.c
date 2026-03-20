@@ -23,6 +23,14 @@
 #define PITCH_UP_LIMIT      0.35f       // 云台俯仰角 向上最大限位 (弧度制) 防止云台撞上枪管/云台架
 #define PITCH_DOWN_LIMIT    -0.45f      // 云台俯仰角 向下最大限位 (弧度制) 防止云台撞上底盘/发射机构
 
+// ===================== 自瞄丢目标扫描参数 =====================
+#define AUTO_SCAN_LOST_DELAY_MS 120U    // 丢目标持续超过该时间后开始扫描
+#define AUTO_SCAN_SPEED_RAD_S   0.8f    // 扫描角速度(rad/s)
+#define AUTO_SCAN_PITCH_CENTER  0.0f    // 点头扫描中心角(rad)
+#define AUTO_SCAN_PITCH_RANGE   0.30f   // 点头扫描半幅(rad)
+#define AUTO_SCAN_PITCH_SPEED   0.8f    // 点头扫描角速度(rad/s)
+#define GIMBAL_TASK_DT_S        0.002f  // 本任务周期2ms
+
 /***********************************************************************************************************************
 * 函数名：Rad_Format
 * 功  能：角度归一化处理，将任意弧度制角度限制在 [-π, π] 区间内
@@ -56,6 +64,10 @@ void gimbal_task_func(void const * argument) {
     static uint8_t last_shoot_on_toggle = 0;    // F 键上一帧状态（起转）
     static uint8_t last_shoot_off_toggle = 0;   // B 键上一帧状态（停转）
     static uint8_t is_initialized = 0;       // 云台初始化标志位 0-未初始化 1-已初始化 防止上电瞬间角度突变甩动
+    static uint8_t was_auto_mode = 0;        // 上一帧是否处于自瞄模式
+    static uint8_t auto_scan_active = 0;     // 自瞄丢目标扫描状态
+    static int8_t auto_scan_pitch_dir = 1;   // 点头方向：1上抬，-1下压
+    static uint32_t last_target_seen_tick = 0U; // 最近一次检测到目标的时间戳
     float world_yaw_target = 0.0f;           // 云台世界坐标系 航向角目标值 (弧度)
     float world_pit_target = 0.0f;           // 云台世界坐标系 俯仰角目标值 (弧度)
 
@@ -171,6 +183,12 @@ void gimbal_task_func(void const * argument) {
 
                 /********************* 模式2：云台自瞄控制【核心优化】解析全局自瞄数据，视觉闭环 *********************/
                 else if (robot_ctrl.gimbal_mode == GIMBAL_AUTO) {
+                    if (!was_auto_mode) {
+                        auto_scan_active = 0U;
+                        auto_scan_pitch_dir = 1;
+                        last_target_seen_tick = current_tick;
+                    }
+
                     // com_task 已完成视觉数据解析，这里只消费 target_info
                     if (robot_ctrl.monitor.vision_online == 1U &&
                         isfinite(robot_ctrl.target_info.aim_target_yaw) &&
@@ -180,6 +198,9 @@ void gimbal_task_func(void const * argument) {
                         // 直接赋值视觉解算后的目标角度，云台跟随目标
                         world_yaw_target = robot_ctrl.target_info.aim_target_yaw;
                         world_pit_target = robot_ctrl.target_info.aim_target_pitch;
+                        last_target_seen_tick = current_tick;
+                        auto_scan_active = 0U;
+                        auto_scan_pitch_dir = 1;
                         // 自瞄模式同样做俯仰角限位，防止视觉数据异常超限
                         if(world_pit_target > PITCH_UP_LIMIT)  world_pit_target = PITCH_UP_LIMIT;
                         if(world_pit_target < PITCH_DOWN_LIMIT)world_pit_target = PITCH_DOWN_LIMIT;
@@ -187,8 +208,39 @@ void gimbal_task_func(void const * argument) {
                     } else {
                         // 指示灯反馈：自瞄模式+丢目标 → 蓝灯闪烁
                         LED_RED_RESET(); LED_BLUE_Toggle(); LED_GREEN_RESET();
+
+                        if (!auto_scan_active) {
+                            if ((uint32_t)(current_tick - last_target_seen_tick) >= AUTO_SCAN_LOST_DELAY_MS) {
+                                auto_scan_active = 1U;
+                                world_pit_target = AUTO_SCAN_PITCH_CENTER;
+                                auto_scan_pitch_dir = 1;
+                            }
+                        }
+
+                        if (auto_scan_active) {
+                            // 连续单方向旋转，转满360度后由Rad_Format归一化。
+                            float step = AUTO_SCAN_SPEED_RAD_S * GIMBAL_TASK_DT_S;
+                            world_yaw_target = Rad_Format(world_yaw_target + step);
+
+                            // Pitch 上下点头扫描，提升重新捕获目标概率。
+                            float pit_step = AUTO_SCAN_PITCH_SPEED * GIMBAL_TASK_DT_S * (float)auto_scan_pitch_dir;
+                            world_pit_target += pit_step;
+
+                            if (world_pit_target >= (AUTO_SCAN_PITCH_CENTER + AUTO_SCAN_PITCH_RANGE)) {
+                                world_pit_target = AUTO_SCAN_PITCH_CENTER + AUTO_SCAN_PITCH_RANGE;
+                                auto_scan_pitch_dir = -1;
+                            } else if (world_pit_target <= (AUTO_SCAN_PITCH_CENTER - AUTO_SCAN_PITCH_RANGE)) {
+                                world_pit_target = AUTO_SCAN_PITCH_CENTER - AUTO_SCAN_PITCH_RANGE;
+                                auto_scan_pitch_dir = 1;
+                            }
+
+                            if (world_pit_target > PITCH_UP_LIMIT) world_pit_target = PITCH_UP_LIMIT;
+                            if (world_pit_target < PITCH_DOWN_LIMIT) world_pit_target = PITCH_DOWN_LIMIT;
+                        }
                     }
                 }
+
+                was_auto_mode = (robot_ctrl.gimbal_mode == GIMBAL_AUTO) ? 1U : 0U;
 
                 /********************* 云台角度闭环输出 + 双重限位保护 【最终防护】 *********************/
                 float cur_yaw, cur_pit;
@@ -213,6 +265,8 @@ void gimbal_task_func(void const * argument) {
             else if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
                 // 指示灯反馈：云台失能 → 红灯常亮
                 LED_GREEN_RESET(); LED_BLUE_RESET(); LED_RED_SET();
+                was_auto_mode = 0U;
+                auto_scan_pitch_dir = 1;
             }
 
             //调试用：

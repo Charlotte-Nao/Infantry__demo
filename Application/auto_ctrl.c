@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include "../../Bsp/LED/bsp_led.h"
 
+#define AUTO_AIM_RECV_TIMEOUT_MS 5
+
 // 全局变量 (保留，无修改)
 static struct uart_device *auto_aim_uart = NULL;
 static struct usb_device *auto_aim_usb = NULL;
@@ -22,8 +24,8 @@ int auto_aim_init(struct usb_device *usb_dev) {
 // 解析目标数据：兼容 valid,shoot,yaw,pitch[,vx,vy]\r\n
 int parse_target_data(target_info_t *target) {
     char buffer[100];
-    // 接收上位机USB数据，超时200us，长度不变
-    int received_len = auto_aim_usb->Recv(auto_aim_usb, buffer, sizeof(buffer) - 1, 200);
+    // 短超时轮询，避免接收任务长阻塞导致底盘速度更新顿挫。
+    int received_len = auto_aim_usb->Recv(auto_aim_usb, buffer, sizeof(buffer) - 1, AUTO_AIM_RECV_TIMEOUT_MS);
 
     if (received_len > 0) {
         buffer[received_len] = '\0';  // 安全添加字符串结束符，修复原代码截断问题

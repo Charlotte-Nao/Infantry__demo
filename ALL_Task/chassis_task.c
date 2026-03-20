@@ -285,6 +285,9 @@ void chassis_task_func(void const * argument) {
                         yaw_align_enable = 0U;
                     }
 
+                    // 自瞄模式联动底盘自转：进入 GIMBAL_AUTO 后底盘持续右旋。
+                    uint8_t auto_spin_active = (robot_ctrl.gimbal_mode == GIMBAL_AUTO) ? 1U : 0U;
+
                     // 更新上一帧按键状态（防抖记录）
                     last_q_pressed = q_pressed;
                     last_e_pressed = e_pressed;
@@ -345,6 +348,11 @@ void chassis_task_func(void const * argument) {
                     } else {
                         // 正常跟随阶段：原有的云台跟随逻辑
                         vw_final = -angle_error * FOLLOW_P_GAIN;
+                    }
+
+                    if (auto_spin_active) {
+                        yaw_align_enable = 0U;
+                        vw_final = speed_ratio;
                     }
 
                     // 步骤5：更新上一帧状态记录（供下一帧边缘检测使用）

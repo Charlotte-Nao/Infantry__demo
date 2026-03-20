@@ -5,11 +5,15 @@
 #include "recv_cmd_task.h"
 
 #include "cmsis_os.h"
+#include <math.h>
 #include "../Application/robot_global.h"
 #include "../Application/auto_ctrl.h"
 #include "../Bsp/usb_cdc/bsp_usb_cdc.h"
 
-#define CHASSIS_CMD_HOLD_TIMEOUT_MS 250U
+#define CHASSIS_CMD_SOFT_TIMEOUT_MS 250U
+#define CHASSIS_CMD_HARD_TIMEOUT_MS 500U
+#define CHASSIS_CMD_DECAY_FACTOR    0.985f
+#define CHASSIS_CMD_LPF_ALPHA       0.20f
 
 static uint32_t last_chassis_cmd_tick = 0U;
 
@@ -28,9 +32,22 @@ static void reset_target_to_hold(void)
 static void process_chassis_cmd_timeout(void)
 {
 	uint32_t now = osKernelSysTick();
-	if ((uint32_t)(now - last_chassis_cmd_tick) >= CHASSIS_CMD_HOLD_TIMEOUT_MS) {
+	uint32_t age = (uint32_t)(now - last_chassis_cmd_tick);
+
+	if (age >= CHASSIS_CMD_HARD_TIMEOUT_MS) {
 		robot_ctrl.chassis.cmd_vx = 0.0f;
 		robot_ctrl.chassis.cmd_vy = 0.0f;
+	} else if (age >= CHASSIS_CMD_SOFT_TIMEOUT_MS) {
+		// Soft timeout: smoothly decay planned speed instead of hard dropping to zero.
+		robot_ctrl.chassis.cmd_vx *= CHASSIS_CMD_DECAY_FACTOR;
+		robot_ctrl.chassis.cmd_vy *= CHASSIS_CMD_DECAY_FACTOR;
+
+		if (fabsf(robot_ctrl.chassis.cmd_vx) < 0.01f) {
+			robot_ctrl.chassis.cmd_vx = 0.0f;
+		}
+		if (fabsf(robot_ctrl.chassis.cmd_vy) < 0.01f) {
+			robot_ctrl.chassis.cmd_vy = 0.0f;
+		}
 	}
 }
 
@@ -38,8 +55,10 @@ static void apply_target_result(void)
 {
 	robot_ctrl.monitor.vision_online = is_target_valid(&robot_ctrl.target_info) ? 1U : 0U;
 	if (robot_ctrl.target_info.chassis_vel_valid) {
-		robot_ctrl.chassis.cmd_vx = robot_ctrl.target_info.chassis_vx;
-		robot_ctrl.chassis.cmd_vy = robot_ctrl.target_info.chassis_vy;
+		float vx_new = robot_ctrl.target_info.chassis_vx;
+		float vy_new = robot_ctrl.target_info.chassis_vy;
+		robot_ctrl.chassis.cmd_vx += CHASSIS_CMD_LPF_ALPHA * (vx_new - robot_ctrl.chassis.cmd_vx);
+		robot_ctrl.chassis.cmd_vy += CHASSIS_CMD_LPF_ALPHA * (vy_new - robot_ctrl.chassis.cmd_vy);
 		last_chassis_cmd_tick = osKernelSysTick();
 	}
 }
