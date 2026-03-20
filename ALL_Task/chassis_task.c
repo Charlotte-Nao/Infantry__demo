@@ -23,9 +23,9 @@
 #define CHASSIS_MAX_RAD         60.0f
 
 // 三档速度配置（可按实车手感直接调参）
-#define CHASSIS_SPEED_GEAR_LOW   0.7f
-#define CHASSIS_SPEED_GEAR_MID   1.0f
-#define CHASSIS_SPEED_GEAR_HIGH  1.5f
+#define CHASSIS_SPEED_GEAR_LOW   0.5f
+#define CHASSIS_SPEED_GEAR_MID   0.5f
+#define CHASSIS_SPEED_GEAR_HIGH  0.5f
 
 // 超级电容低压滞回阈值（capacity_voltage 单位：*100）
 #define CAP_VOLT_ENTER_LOW_GEAR  1500  // <= 8.00V 强制最低档
@@ -214,9 +214,6 @@ void chassis_task_func(void const * argument) {
                               (unsigned long)((hb_tick_diff >= 0) ? hb_tick_diff : 0),
                               (unsigned long)ok_cnt,
                               (unsigned long)bad_len_cnt);
-
-            LOG_PRINT("[CHS][STATE] heat17=%u\r\n",
-                      (unsigned int)robot_ctrl.game_info.shooter_17mm_barrel_heat);
             last_diag_tick = current_tick;
         }
 
@@ -281,6 +278,12 @@ void chassis_task_func(void const * argument) {
                     // 根据切换状态设置 vw_kb 为固定手动速度（与 speed_ratio 同量级），或保持为 0
                     if (left_rotate_toggle) vw_kb = -speed_ratio;
                     else if (right_rotate_toggle) vw_kb = speed_ratio;
+
+                    // custom_r 控制模式下，收到有效目标后强制右旋
+                    if (robot_ctrl.monitor.plan_enabled && (robot_ctrl.target_info.valid == 1U)) {
+                        vw_kb = speed_ratio;
+                        yaw_align_enable = 0U;
+                    }
 
                     // 更新上一帧按键状态（防抖记录）
                     last_q_pressed = q_pressed;

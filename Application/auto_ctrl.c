@@ -34,22 +34,22 @@ int parse_target_data(target_info_t *target) {
 
         // 第1段：解析 valid 目标有效标志 (整型 1=有效 0=无效)
         token = strtok_r(rest, delim, &rest);
-        if (!token) return 0;
+        if (!token) return -1;
         target->valid = atoi(token);
 
         // 第2段：解析 shoot 发射允许标志 (整型 1=可发射 0=不可发射)
         token = strtok_r(NULL, delim, &rest);
-        if (!token) return 0;
+        if (!token) return -1;
         target->shoot = atoi(token);
 
         // 第3段：解析 yaw 云台航向角目标值 (浮点型)
         token = strtok_r(NULL, delim, &rest);
-        if (!token) return 0;
+        if (!token) return -1;
         target->aim_target_yaw = strtof(token, NULL);
 
         // 第4段：解析 pitch 云台俯仰角目标值 (浮点型)
         token = strtok_r(NULL, delim, &rest);
-        if (!token) return 0;
+        if (!token) return -1;
         target->aim_target_pitch = strtof(token, NULL);
 
         // 第5/6段：可选解析底盘规划速度 vx/vy（未携带则置零）
