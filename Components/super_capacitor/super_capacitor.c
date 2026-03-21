@@ -2,9 +2,28 @@
 
 #include <string.h>
 
+#include <math.h>
+
 #include "../../Bsp/LED/bsp_LED.h"
 
 static super_capacitor_data_t g_supercap_data;
+static uint16_t g_yaw_raw_8192 = 0U;
+static uint8_t g_yaw_valid = 0U;
+
+#define GM6020_YAW_STDID         0x206U
+#define GM6020_ECD_TO_RAD        (2.0f * (float)M_PI / 8192.0f)
+
+static void SuperCap_TryParseYaw(const CAN_RxHeaderTypeDef *rx_header, const uint8_t rx_data[8])
+{
+	if (rx_header == NULL || rx_data == NULL) return;
+	if (rx_header->IDE != CAN_ID_STD || rx_header->RTR != CAN_RTR_DATA) return;
+	if (rx_header->StdId != GM6020_YAW_STDID || rx_header->DLC < 2U) return;
+
+	g_yaw_raw_8192 = (uint16_t)(((uint16_t)rx_data[0] << 8) | (uint16_t)rx_data[1]);
+	g_yaw_raw_8192 &= 0x1FFFU;
+	if (g_yaw_raw_8192 >= 8192U) g_yaw_raw_8192 %= 8192U;
+	g_yaw_valid = 1U;
+}
 
 static int16_t SuperCap_DecodeS16(const uint8_t high_or_low, const uint8_t low_or_high)
 {
@@ -50,6 +69,13 @@ uint8_t SuperCap_ReadPack(MY_CAN_Tx_Pack *pack)
 	return 1U;
 }
 
+uint8_t SuperCap_GetYawPosRad(float *yaw_pos_rad)
+{
+	if (yaw_pos_rad == NULL || g_yaw_valid == 0U) return 0U;
+	*yaw_pos_rad = (float)g_yaw_raw_8192 * GM6020_ECD_TO_RAD;
+	return 1U;
+}
+
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
 
@@ -58,5 +84,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK) return;
 
+	(void)hcan;
+	SuperCap_TryParseYaw(&rx_header, rx_data);
 	(void)SuperCap_TryParse(&rx_header, rx_data);
 }

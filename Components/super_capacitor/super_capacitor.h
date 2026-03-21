@@ -50,5 +50,6 @@ void SuperCap_Init(void);
 uint8_t SuperCap_TryParse(const CAN_RxHeaderTypeDef *rx_header, const uint8_t rx_data[8]);
 const super_capacitor_data_t *SuperCap_GetData(void);
 uint8_t SuperCap_ReadPack(MY_CAN_Tx_Pack *pack);
+uint8_t SuperCap_GetYawPosRad(float *yaw_pos_rad);
 
 #endif //INFANTRY_01_SUPER_CAPACITOR_H
