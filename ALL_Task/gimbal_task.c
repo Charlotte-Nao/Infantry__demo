@@ -34,10 +34,16 @@
 // ===================== 云台抗抖参数（底盘自转时优先稳态） =====================
 #define YAW_ERR_DEADBAND_RAD    0.004f  // 小误差死区，抑制抖动
 #define YAW_DAMP_K              0.000f  // 角速度阻尼先关闭，避免持续自转时引入方向相关静差
-#define YAW_FF_ALPHA            0.35f   // 前馈一阶滤波系数（加快响应，减少相位滞后）
-#define YAW_FF_LIMIT            30.0f    // 前馈限幅，避免瞬态注入过大
-#define YAW_FF_GAIN             2.60f   // 前馈比例系数（现场可调）
+#define YAW_FF_ALPHA            0.04f   // 前馈一阶滤波系数（降低起步冲击）
+#define YAW_FF_LIMIT            200.0f  // 前馈限幅，避免瞬态注入过大
+#define YAW_FF_GAIN             2.0f   // 前馈比例系数（稳���偏差交给微积分补偿）
 #define YAW_FF_SIGN             1.0f    // 前馈方向（若仍反向偏差，改为 -1.0f）
+#define YAW_FF_STEP_MAX         1.6f    // 前馈每周期最大变化量，抑制起步过头
+
+// 小积分只用于消除稳态微小偏差，避免大误差阶段过积分
+#define YAW_I_GAIN              0.55f
+#define YAW_I_LIMIT             0.10f
+#define YAW_I_ACTIVE_ERR_RAD    0.20f
 
 static float clampf(float v, float vmin, float vmax)
 {
@@ -84,6 +90,7 @@ void gimbal_task_func(void const * argument) {
     static int8_t auto_scan_pitch_dir = 1;   // 点头方向：1上抬，-1下压
     static uint32_t last_target_seen_tick = 0U; // 最近一次检测到目标的时间戳
     static float yaw_ff_filtered = 0.0f;     // 底盘自转前馈滤波值
+    static float yaw_i_term = 0.0f;          // yaw误差微积分项（仅消静差）
     float world_yaw_target = 0.0f;           // 云台世界坐标系 航向角目标值 (弧度)
     float world_pit_target = 0.0f;           // 云台世界坐标系 俯仰角目标值 (弧度)
 
@@ -106,6 +113,7 @@ void gimbal_task_func(void const * argument) {
             robot_ctrl.gimbal_mode = GIMBAL_RELAX;       // 云台强制进入失能模式，无动力
             robot_ctrl.shoot_mode = SHOOT_STOP;          // 发射机构强制停止，所有发射电机归零
             is_initialized = 0;                          // 云台初始化标志位清零，重连后重新初始化
+            yaw_i_term = 0.0f;
 
 
             // 指示灯反馈：遥控器掉线 → 红灯闪烁 (全局最高优先级，其他状态被覆盖)
@@ -153,10 +161,12 @@ void gimbal_task_func(void const * argument) {
                 robot_ctrl.gimbal_mode = GIMBAL_RELAX;
                 is_initialized = 0;
                 yaw_ff_filtered = 0.0f;
+                yaw_i_term = 0.0f;
             } else {
                 if (robot_ctrl.gimbal_mode == GIMBAL_RELAX) {
                     robot_ctrl.gimbal_mode = GIMBAL_REMOTE;
                     is_initialized = 0;
+                    yaw_i_term = 0.0f;
                 }
 
                 // 触发模式切换：手动 ↔ 自瞄 互切，仅在云台使能状态下有效
@@ -272,9 +282,23 @@ void gimbal_task_func(void const * argument) {
 
                 float yaw_ff_raw = clampf((YAW_FF_SIGN * YAW_FF_GAIN) * robot_ctrl.chassis.yaw_speed,
                                           -YAW_FF_LIMIT, YAW_FF_LIMIT);
+
+                // 先限斜率再滤波，减少自转起步时前馈瞬态过冲
+                float ff_delta = yaw_ff_raw - yaw_ff_filtered;
+                if (ff_delta > YAW_FF_STEP_MAX) ff_delta = YAW_FF_STEP_MAX;
+                if (ff_delta < -YAW_FF_STEP_MAX) ff_delta = -YAW_FF_STEP_MAX;
+                yaw_ff_filtered += ff_delta;
                 yaw_ff_filtered += YAW_FF_ALPHA * (yaw_ff_raw - yaw_ff_filtered);
 
-                float yaw_out = cur_yaw + yaw_err - (YAW_DAMP_K * robot_ctrl.gimbal.yaw_v);
+                // 仅在小误差区启用微积分，专门吃掉稳态残余误差
+                if (fabsf(yaw_err) < YAW_I_ACTIVE_ERR_RAD) {
+                    yaw_i_term += YAW_I_GAIN * yaw_err * GIMBAL_TASK_DT_S;
+                    yaw_i_term = clampf(yaw_i_term, -YAW_I_LIMIT, YAW_I_LIMIT);
+                } else {
+                    yaw_i_term *= 0.995f;
+                }
+
+                float yaw_out = cur_yaw + yaw_err + yaw_i_term - (YAW_DAMP_K * robot_ctrl.gimbal.yaw_v);
                 float pit_out = cur_pit - (world_pit_target - robot_ctrl.gimbal.pitch);
 
                 // 俯仰角输出值二次限位 【第二道防护，终极防护】防止任何情况超限
@@ -294,6 +318,7 @@ void gimbal_task_func(void const * argument) {
                 was_auto_mode = 0U;
                 auto_scan_pitch_dir = 1;
                 yaw_ff_filtered = 0.0f;
+                yaw_i_term = 0.0f;
             }
 
             //调试用：
