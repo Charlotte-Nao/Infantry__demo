@@ -36,10 +36,19 @@
 #define WHEEL_ACTIVE_THRESHOLD  0.01f    // 拨轮有效输入阈值
 #define QE_ACTIVE_THRESHOLD     0.01f     // Q/E有效输入阈值
 
+// 底盘渐加速参数（单位：归一化速度/秒）
+#define CHASSIS_VX_ACCEL_UP      2.2f
+#define CHASSIS_VX_ACCEL_DOWN    4.2f
+#define CHASSIS_VY_ACCEL_UP      2.2f
+#define CHASSIS_VY_ACCEL_DOWN    4.2f
+#define CHASSIS_VW_ACCEL_UP      2.5f
+#define CHASSIS_VW_ACCEL_DOWN    5.0f
+
 /* --- 静态控制变量 --- */
 static float world_yaw_target = 0.0f;
 static float world_pit_target = 0.0f;
 static float vx_ramp = 0.0f, vy_ramp = 0.0f;
+static float vw_ramp = 0.0f;
 
 static uint32_t last_rc_tick = 0;
 
@@ -69,6 +78,23 @@ static float Rad_Format(float angle) {
     return angle;
 }
 
+static float Chassis_Slew_Limit(float target, float current, float accel_up, float accel_down, float dt_s)
+{
+    float delta = target - current;
+    float max_step;
+
+    // 反向或减速时用更大的下坡斜率，保证松手后不拖沓
+    if ((target * current < 0.0f) || (fabsf(target) < fabsf(current))) {
+        max_step = accel_down * dt_s;
+    } else {
+        max_step = accel_up * dt_s;
+    }
+
+    if (delta > max_step) delta = max_step;
+    if (delta < -max_step) delta = -max_step;
+    return current + delta;
+}
+
 void chassis_task_func(void const * argument) {
     /******************************************************************************************************************/
     /* 初始化 */
@@ -87,6 +113,7 @@ void chassis_task_func(void const * argument) {
     float wheel_targets[4] = {0};
     uint8_t last_remote_online = 0xFFU;
     uint32_t last_diag_tick = 0U;
+    uint32_t last_ctrl_tick = 0U;
 
     /******************************************************************************************************************/
     // 系统启动保护
@@ -97,6 +124,15 @@ void chassis_task_func(void const * argument) {
     // 主循环
     while (1) {
         uint32_t current_tick = osKernelSysTick();
+        float dt_s = 0.002f;
+        if (last_ctrl_tick != 0U) {
+            uint32_t dt_ms = (uint32_t)(current_tick - last_ctrl_tick);
+            if (dt_ms == 0U) dt_ms = 1U;
+            if (dt_ms > 20U) dt_ms = 20U;
+            dt_s = (float)dt_ms * 0.001f;
+        }
+        last_ctrl_tick = current_tick;
+
         if (log_uart == NULL) {
             log_uart = uart_get_device("uart1_dma");
         }
@@ -122,6 +158,9 @@ void chassis_task_func(void const * argument) {
             last_q_pressed = 0;
             last_e_pressed = 0;
             last_custom_r_pressed = 0;
+            vx_ramp = 0.0f;
+            vy_ramp = 0.0f;
+            vw_ramp = 0.0f;
 
             if (last_remote_online != 0U) {
                 LOG_VERBOSE_PRINT("[CHS][TIMEOUT] t=%lu last_rc=%lu dt=%ld\r\n",
@@ -174,6 +213,9 @@ void chassis_task_func(void const * argument) {
                 last_e_pressed = 0;
                 robot_ctrl.monitor.plan_enabled = 0;
                 last_custom_r_pressed = 0;
+                vx_ramp = 0.0f;
+                vy_ramp = 0.0f;
+                vw_ramp = 0.0f;
             }
 
             robot_ctrl.chassis_mode = robot_ctrl.monitor.system_enabled ? CHASSIS_FOLLOW : CHASSIS_RELAX;
@@ -306,6 +348,10 @@ void chassis_task_func(void const * argument) {
                         total_vy = total_vy / v_norm * speed_ratio;
                     }
 
+                    // --- B2. 渐加速/渐减速 ---
+                    vx_ramp = Chassis_Slew_Limit(total_vx, vx_ramp, CHASSIS_VX_ACCEL_UP, CHASSIS_VX_ACCEL_DOWN, dt_s);
+                    vy_ramp = Chassis_Slew_Limit(total_vy, vy_ramp, CHASSIS_VY_ACCEL_UP, CHASSIS_VY_ACCEL_DOWN, dt_s);
+
                     // --- C. 跟随与旋转逻辑（扩展：Q/E+拨轮统一回正）---
                     float yaw_m_pos;
                     yaw_m->get_status(yaw_m, "POS", &yaw_m_pos);
@@ -355,6 +401,9 @@ void chassis_task_func(void const * argument) {
                         vw_final = speed_ratio;
                     }
 
+                    vw_ramp = Chassis_Slew_Limit(vw_final, vw_ramp, CHASSIS_VW_ACCEL_UP, CHASSIS_VW_ACCEL_DOWN, dt_s);
+                    vw_final = vw_ramp;
+
                     // 步骤5：更新上一帧状态记录（供下一帧边缘检测使用）
                     last_wheel_active = current_wheel_active;
                     last_qe_active = current_qe_active;
@@ -362,8 +411,8 @@ void chassis_task_func(void const * argument) {
                     robot_ctrl.chassis.yaw_speed = vw_final * CHASSIS_MAX_RAD;
 
                     // --- D. 随动坐标系变换 ---
-                    float final_vx = total_vx * cosf(angle_error) - total_vy * sinf(angle_error);
-                    float final_vy = total_vx * sinf(angle_error) + total_vy * cosf(angle_error);
+                    float final_vx = vx_ramp * cosf(angle_error) - vy_ramp * sinf(angle_error);
+                    float final_vy = vx_ramp * sinf(angle_error) + vy_ramp * cosf(angle_error);
 
                     // --- E. 逆运动学计算 ---
                     wheel_targets[0] = (final_vx + final_vy - vw_final) * MOTOR_RPM_TO_VECTOR;
@@ -375,10 +424,17 @@ void chassis_task_func(void const * argument) {
                         if (chassis[i]) chassis[i]->set_target(chassis[i], 1, wheel_targets[i]);
                     }
                 }
+            } else {
+                vx_ramp = 0.0f;
+                vy_ramp = 0.0f;
+                vw_ramp = 0.0f;
             }
         }
         else {
             // 遥控器掉线：红灯快闪
+            vx_ramp = 0.0f;
+            vy_ramp = 0.0f;
+            vw_ramp = 0.0f;
             osDelay(100);
         }
 
