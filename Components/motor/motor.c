@@ -861,21 +861,14 @@ void M2006_VEL_PID_get_status(const struct motor_device *motor, const char* whic
     else if (strcmp(which_status, "TEMP") == 0) *(int8_t *)status_data = d->TEMP;
     else if (strcmp(which_status, "ERR") == 0) *(int8_t *)status_data = d->ERR;
     else if (strcmp(which_status, "v_des") == 0) *(int16_t *)status_data = d->_v_des;
-    else if (strcmp(which_status, "p_des_sum") == 0) *(int32_t *)status_data = d->_p_des_sum;
-    else if (strcmp(which_status, "mode") == 0) *(uint8_t *)status_data = d->ctrl_mode;
     else if (strcmp(which_status, "Kp") == 0) *(float *)status_data = d->_kp;
     else if (strcmp(which_status, "Ki") == 0) *(float *)status_data = d->_ki;
     else if (strcmp(which_status, "Kd") == 0) *(float *)status_data = d->_kd;
-    else if (strcmp(which_status, "Kp_pos") == 0) *(float *)status_data = d->_kp_pos;
-    else if (strcmp(which_status, "Ki_pos") == 0) *(float *)status_data = d->_ki_pos;
-    else if (strcmp(which_status, "v_des_limit") == 0) *(float *)status_data = d->_v_des_limit;
-    else if (strcmp(which_status, "pos_deadband") == 0) *(int32_t *)status_data = d->_pos_deadband;
     else if (strcmp(which_status, "current_max") == 0) *(float *)status_data = d->_current_output_max;
     else if (strcmp(which_status, "i_max") == 0) *(float *)status_data = d->_i_output_max;
     else if (strcmp(which_status, "alpha") == 0) *(float *)status_data = d->_d_filter_alpha;
 }
 
-/* M2006 参数设置 */
 void M2006_VEL_PID_set_para(const struct motor_device *motor, const char* which_para, void* para_data) {
     if (motor == NULL || motor->motor_data == NULL || which_para == NULL || para_data == NULL) return;
     struct M2006_data *d = (struct M2006_data *)motor->motor_data;
@@ -916,6 +909,7 @@ struct GM6020_data {
     // 位置环 PID (外环)
     float _kp_p;
     float _ki_p;
+    float _kd_p;             // 位置环阻尼项（基于速度反馈）
     float _i_term_p;
     float _i_p_max;
 
@@ -971,7 +965,7 @@ void GM6020_PV_init(struct motor_device *motor, uint32_t motor_ID, CAN_HandleTyp
         va_list ap;
         va_start(ap, para_num);
 
-        // 顺序：P_Kp, P_Ki, V_Kp, V_Ki, V_Kd, Out_Max, V_Limit, Alpha
+        // 顺序：P_Kp, P_Ki, V_Kp, V_Ki, V_Kd, Out_Max, V_Limit, Alpha, V_Only_Kp, [可选]P_Kd
         if (para_num >= 1) d->_kp_p = (float)va_arg(ap, double);
         if (para_num >= 2) d->_ki_p = (float)va_arg(ap, double);
 
@@ -982,8 +976,8 @@ void GM6020_PV_init(struct motor_device *motor, uint32_t motor_ID, CAN_HandleTyp
         if (para_num >= 6) d->_out_max = (float)va_arg(ap, double);
         if (para_num >= 7) d->_v_limit = (float)va_arg(ap, double);
         if (para_num >= 8) d->_d_filter_alpha = (float)va_arg(ap, double);
-
         if (para_num >= 9) d->_kp_v_only = (float)va_arg(ap, double);
+        if (para_num >= 10) d->_kd_p = (float)va_arg(ap, double);
 
         va_end(ap);
     }
@@ -1042,7 +1036,7 @@ void GM6020_PV_update(struct motor_device *motor) {
     if (d->_i_term_p > d->_i_p_max) d->_i_term_p = d->_i_p_max;
     if (d->_i_term_p < -d->_i_p_max) d->_i_term_p = -d->_i_p_max;
 
-    d->_v_des_internal = d->_kp_p * p_error + d->_i_term_p;
+    d->_v_des_internal = d->_kp_p * p_error + d->_i_term_p - d->_kd_p * (float)d->VEL;
 
     // 速度限制
     if (d->_v_des_internal > d->_v_limit) d->_v_des_internal = d->_v_limit;
@@ -1096,7 +1090,7 @@ void GM6020_PV_V_update(struct motor_device *motor) {
     if (d->_i_term_p > d->_i_p_max) d->_i_term_p = d->_i_p_max;
     if (d->_i_term_p < -d->_i_p_max) d->_i_term_p = -d->_i_p_max;
 
-    d->_v_des_internal = d->_kp_p * p_error + d->_i_term_p;
+    d->_v_des_internal = d->_kp_p * p_error + d->_i_term_p - d->_kd_p * (float)d->VEL;
 
     // 速度限制
     if (d->_v_des_internal > d->_v_limit) d->_v_des_internal = d->_v_limit;
@@ -1144,6 +1138,7 @@ void GM6020_PV_get_status(const struct motor_device *motor, const char* which_st
     else if (strcmp(which_status, "VEL") == 0) *(int16_t *)status_data = d->VEL;
     else if (strcmp(which_status, "p_des") == 0) *(float *)status_data = d->_p_des;
     else if (strcmp(which_status, "Kp_p") == 0) *(float *)status_data = d->_kp_p;
+    else if (strcmp(which_status, "Kd_p") == 0) *(float *)status_data = d->_kd_p;
     else if (strcmp(which_status, "Kp_v") == 0) *(float *)status_data = d->_kp_v;
     else if (strcmp(which_status, "out_max") == 0) *(float *)status_data = d->_out_max;
 }
@@ -1153,6 +1148,7 @@ void GM6020_PV_set_para(const struct motor_device *motor, const char* which_para
     struct GM6020_data *d = (struct GM6020_data *)motor->motor_data;
     if (strcmp(which_para, "Kp_p") == 0)      d->_kp_p = *(float *)para_data;
     else if (strcmp(which_para, "Ki_p") == 0) d->_ki_p = *(float *)para_data;
+    else if (strcmp(which_para, "Kd_p") == 0) d->_kd_p = *(float *)para_data;
     else if (strcmp(which_para, "Kp_v") == 0) d->_kp_v = *(float *)para_data;
     else if (strcmp(which_para, "Ki_v") == 0) d->_ki_v = *(float *)para_data;
     else if (strcmp(which_para, "Kd_v") == 0) d->_kd_v = *(float *)para_data;
@@ -1409,17 +1405,18 @@ static void All_Motors_Init(void) {
     );
 
     // 4. GM6020 YAW轴 (位置-速度串级)
-    // 参数含义: [ID, 句柄, 参数个数, P_Kp, P_Ki, V_Kp, V_Ki, V_Kd, Out_Max]
-    GM6020_YAW.init(&GM6020_YAW, 0x206, &hcan1, 9,
-                    500.0,     /* P_Kp */
-                    0.0,      /* P_Ki */
-                    300.0,    /* V_Kp */
-                    0.0,      /* V_Ki */
-                    0.0,      /* V_Kd */
+    // 参数含义: [ID, 句柄, 参数个数, P_Kp, P_Ki, V_Kp, V_Ki, V_Kd, Out_Max, V_Limit, Alpha, V_Only_Kp, P_Kd]
+    GM6020_YAW.init(&GM6020_YAW, 0x206, &hcan1, 10,
+                    420.0,     /* P_Kp */
+                    0.0,       /* P_Ki */
+                    200.0,     /* V_Kp */
+                    0.0,       /* V_Ki */
+                    0.0,       /* V_Kd */
                     25000.0,   /* Out_Max */
                     320.0,     /* V_Limit */
-                    1.0,      /* Alpha */
-                    300.0    /* V Only Kp */
+                    1.0,       /* Alpha */
+                    300.0,     /* V Only Kp */
+                    1.45       /* P_Kd: 一级位置阻尼 */
     );
 
     // 5. 摩擦轮电机 M3508 (速度环)
