@@ -93,16 +93,19 @@ void shoot_task_func(void const * argument)
 			auto_fire_active = 0U;
 		}
 
+		uint8_t manual_fire_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_l || robot_ctrl.rc->vt13.rc_vt13.trigger);
+
 		if (robot_ctrl.gimbal_mode == GIMBAL_REMOTE)
 		{
-			fire_cmd = (robot_ctrl.rc->vt13.mouse_vt13.press_l || robot_ctrl.rc->vt13.rc_vt13.trigger)
+			// 纯手动模式：只有物理按键能开火
+			fire_cmd = manual_fire_cmd
 					 && (robot_ctrl.shoot_mode == SHOOT_READY)
 					 && (feed_block == 0U);
 		}
 		else if (robot_ctrl.gimbal_mode == GIMBAL_AUTO)
 		{
-			/* Auto-aim: upper computer shoot flag directly controls feeding. */
-			fire_cmd = (robot_ctrl.target_info.shoot == 1U)
+			/* 自瞄模式：视觉下发 shoot=1 或 操作手强制按左键 均可开火 */
+			fire_cmd = ( (robot_ctrl.target_info.shoot == 1U) || manual_fire_cmd )
 					 && (robot_ctrl.shoot_mode == SHOOT_READY)
 					 && (feed_block == 0U);
 		}

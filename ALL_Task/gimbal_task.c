@@ -156,6 +156,7 @@ void gimbal_task_func(void const * argument) {
             // 云台模式切换条件：VT13遥控器自定义左按键 或 鼠标右键 按下 (原先为 VT13 G 键)
             uint8_t mode_cmd = (robot_ctrl.rc->vt13.rc_vt13.custom_l) || (robot_ctrl.rc->vt13.mouse_vt13.press_r);
             uint8_t mode_trigger = (mode_cmd && !last_mode_toggle);     // 按键上升沿触发，防抖
+            uint8_t auto_aim_holding = (robot_ctrl.rc->vt13.mouse_vt13.press_r) || (robot_ctrl.rc->vt13.rc_vt13.custom_l);
 
             if (!robot_ctrl.monitor.system_enabled) {
                 robot_ctrl.gimbal_mode = GIMBAL_RELAX;
@@ -170,8 +171,10 @@ void gimbal_task_func(void const * argument) {
                 }
 
                 // 触发模式切换：手动 ↔ 自瞄 互切，仅在云台使能状态下有效
-                if (mode_trigger) {
-                    robot_ctrl.gimbal_mode = (robot_ctrl.gimbal_mode == GIMBAL_REMOTE) ? GIMBAL_AUTO : GIMBAL_REMOTE;
+                if (auto_aim_holding) {
+                    robot_ctrl.gimbal_mode = GIMBAL_AUTO;
+                } else {
+                    robot_ctrl.gimbal_mode = GIMBAL_REMOTE;
                 }
             }
 
