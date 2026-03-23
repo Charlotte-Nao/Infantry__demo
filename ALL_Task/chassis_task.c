@@ -173,8 +173,8 @@ void chassis_task_func(void const * argument) {
             /**********************************************************************************************************/
             // 统一失能/使能按键：pause=切换，C=使能，X=失能
             uint8_t pause_cmd = rc->vt13.rc_vt13.pause;
-            uint8_t enable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_C);
-            uint8_t disable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_X);
+            uint8_t enable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_CTRL);
+            uint8_t disable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_V);
             uint8_t pause_trigger = (pause_cmd && !last_pause_cmd);
             uint8_t enable_trigger = (enable_cmd && !last_enable_cmd);
             uint8_t disable_trigger = (disable_cmd && !last_disable_cmd);

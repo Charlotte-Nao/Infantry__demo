@@ -10,7 +10,7 @@
 /* 500Hz shoot control parameters */
 #define SHOOT_FW_SPEED         6000.0f
 #define STIR_REVERSE_SPEED     2500.0f
-#define SHOOT_HEAT_LIMIT_17MM  70U
+#define SHOOT_HEAT_LIMIT_17MM  200U
 #define SHOOT_TASK_PERIOD_MS   2U
 
 /* 长按连发参数：先单发，再按住一段时间进入连发 */
