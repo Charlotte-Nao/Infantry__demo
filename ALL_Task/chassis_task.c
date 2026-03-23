@@ -16,7 +16,7 @@
 #define MOUSE_PIT_SENS          0.0002f  // 鼠标纵向灵敏度
 #define FOLLOW_P_GAIN           0.5f
 #define RC_DEADZONE             10
-#define YAW_CENTER_OFFSET       1.9f//-1.7f（步兵） //1.9f（哨兵）
+#define YAW_CENTER_OFFSET       -1.68f//-1.7f（步兵） //1.9f（哨兵）
 
 // 底盘几何参数配置
 #define MOTOR_RPM_TO_VECTOR     3000.0f
@@ -25,7 +25,7 @@
 // 三档速度配置（可按实车手感直接调参）
 #define CHASSIS_SPEED_GEAR_LOW   0.5f
 #define CHASSIS_SPEED_GEAR_MID   1.0f
-#define CHASSIS_SPEED_GEAR_HIGH  1.5f
+#define CHASSIS_SPEED_GEAR_HIGH  2.0f
 
 // 超级电容低压滞回阈值（capacity_voltage 单位：*100）
 #define CAP_VOLT_ENTER_LOW_GEAR  1500  // <= 8.00V 强制最低档

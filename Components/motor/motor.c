@@ -1407,7 +1407,7 @@ static void All_Motors_Init(void) {
     // 4. GM6020 YAW轴 (位置-速度串级)
     // 参数含义: [ID, 句柄, 参数个数, P_Kp, P_Ki, V_Kp, V_Ki, V_Kd, Out_Max, V_Limit, Alpha, V_Only_Kp, P_Kd]
     GM6020_YAW.init(&GM6020_YAW, 0x206, &hcan1, 10,
-                    420.0,     /* P_Kp */
+                    300.0,     /* P_Kp */
                     0.0,       /* P_Ki */
                     200.0,     /* V_Kp */
                     0.0,       /* V_Ki */
@@ -1416,7 +1416,7 @@ static void All_Motors_Init(void) {
                     320.0,     /* V_Limit */
                     1.0,       /* Alpha */
                     300.0,     /* V Only Kp */
-                    1.45       /* P_Kd: 一级位置阻尼 */
+                    0.9       /* P_Kd: 一级位置阻尼 */
     );
 
     // 5. 摩擦轮电机 M3508 (速度环)
