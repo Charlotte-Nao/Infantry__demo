@@ -8,8 +8,8 @@
 
 #define UI_SEND_PERIOD_MS            100U
 #define UI_HIT_HIGHLIGHT_MS          300U
-#define UI_CAP_VOLTAGE_MIN_X100      800U
-#define UI_CAP_VOLTAGE_MAX_X100      2600U
+#define UI_CAP_VOLTAGE_MIN_X100      800U    //超级电容最低可达5V，在此选择8V用于保险起见
+#define UI_CAP_VOLTAGE_MAX_X100      2750U  //超级电容最高可达到27.5V
 #define UI_CAP_GREEN_X100            2000U
 #define UI_CAP_YELLOW_X100           1500U
 #define UI_CAP_MARK_15_X100          1500U
@@ -40,6 +40,13 @@
 #define UI_CAR_Y0                    (UI_CAR_CENTER_Y - UI_CAR_HALF_SIZE)
 #define UI_CAR_X1                    (UI_CAR_CENTER_X + UI_CAR_HALF_SIZE)
 #define UI_CAR_Y1                    (UI_CAR_CENTER_Y + UI_CAR_HALF_SIZE)
+
+// 新增：弹道下坠参考点（实心正方形点）布局
+#define UI_AIM_DROP_OFFSET           60U    // 下坠补偿像素（可根据实际弹道及摩擦轮转速微调）
+#define UI_AIM_X                     UI_CENTER_X
+#define UI_AIM_Y                     (UI_CENTER_Y - UI_AIM_DROP_OFFSET) // Y轴向下减小
+#define UI_AIM_SIZE                  6U     // 正方形边长（即线宽与线长，数字越大点越粗）
+#define UI_AIM_HALF_SIZE             (UI_AIM_SIZE / 2U)
 
 typedef enum
 {
@@ -441,9 +448,10 @@ void ui_task_func(void const * argument) {
                               (uint16_t)(UI_CENTER_X + 480U), 20U,
                               (uint16_t)(UI_CENTER_X + 240U), (uint16_t)(UI_CAR_Y0 + 160U), 2U);
 
-                    // 占位图元，保持固定7图元发送，提高稳定性。
-                    make_line(&armor_figs7[6], 'A', 'D', '0', op_armor, REF_UI_COLOR_GREEN,
-                              car_cx, car_cy, (uint16_t)(car_cx + 1U), (uint16_t)(car_cy + 1U), 1U);
+                        // 弹道下坠瞄准参考点（利用长度等于线宽的线段，画出一个实心正方形）
+                    make_line(&armor_figs7[6], 'A', 'I', 'M', op_armor, REF_UI_COLOR_YELLOW,
+                              (uint16_t)(UI_AIM_X - UI_AIM_HALF_SIZE), UI_AIM_Y,
+                              (uint16_t)(UI_AIM_X + UI_AIM_HALF_SIZE), UI_AIM_Y, UI_AIM_SIZE);
 
                     }
 
