@@ -236,34 +236,6 @@ void gimbal_task_func(void const * argument) {
                         // 指示灯反馈：自瞄模式+丢目标 → 蓝灯闪烁
                         LED_RED_RESET(); LED_BLUE_Toggle(); LED_GREEN_RESET();
 
-                        if (!auto_scan_active) {
-                            if ((uint32_t)(current_tick - last_target_seen_tick) >= AUTO_SCAN_LOST_DELAY_MS) {
-                                auto_scan_active = 1U;
-                                world_pit_target = AUTO_SCAN_PITCH_CENTER;
-                                auto_scan_pitch_dir = 1;
-                            }
-                        }
-
-                        if (auto_scan_active) {
-                            // 连续单方向旋转，转满360度后由Rad_Format归一化。
-                            float step = AUTO_SCAN_SPEED_RAD_S * GIMBAL_TASK_DT_S;
-                            world_yaw_target = Rad_Format(world_yaw_target + step);
-
-                            // Pitch 上下点头扫描，提升重新捕获目标概率。
-                            float pit_step = AUTO_SCAN_PITCH_SPEED * GIMBAL_TASK_DT_S * (float)auto_scan_pitch_dir;
-                            world_pit_target += pit_step;
-
-                            if (world_pit_target >= (AUTO_SCAN_PITCH_CENTER + AUTO_SCAN_PITCH_RANGE)) {
-                                world_pit_target = AUTO_SCAN_PITCH_CENTER + AUTO_SCAN_PITCH_RANGE;
-                                auto_scan_pitch_dir = -1;
-                            } else if (world_pit_target <= (AUTO_SCAN_PITCH_CENTER - AUTO_SCAN_PITCH_RANGE)) {
-                                world_pit_target = AUTO_SCAN_PITCH_CENTER - AUTO_SCAN_PITCH_RANGE;
-                                auto_scan_pitch_dir = 1;
-                            }
-
-                            if (world_pit_target > PITCH_UP_LIMIT) world_pit_target = PITCH_UP_LIMIT;
-                            if (world_pit_target < PITCH_DOWN_LIMIT) world_pit_target = PITCH_DOWN_LIMIT;
-                        }
                     }
                 }
 

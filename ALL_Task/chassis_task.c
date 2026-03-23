@@ -171,7 +171,7 @@ void chassis_task_func(void const * argument) {
         } else {
             robot_ctrl.monitor.remote_online = 1;
             /**********************************************************************************************************/
-            // 统一失能/使能按键：pause=切换，C=使能，X=失能
+            // 统一失能/使能按键：pause=切换，Ctrl=使能，v=失能
             uint8_t pause_cmd = rc->vt13.rc_vt13.pause;
             uint8_t enable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_CTRL);
             uint8_t disable_cmd = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_V);
@@ -227,7 +227,7 @@ void chassis_task_func(void const * argument) {
             // custom_r 由“按住生效”改为“上升沿切换生效”
             uint8_t custom_r_pressed = rc->vt13.rc_vt13.custom_r ? 1U : 0U;
             if (custom_r_pressed && !last_custom_r_pressed && robot_ctrl.monitor.system_enabled) {
-                robot_ctrl.monitor.plan_enabled ^= 1U;
+                // robot_ctrl.monitor.plan_enabled ^= 1U;
                 LOG_VERBOSE_PRINT("[CHS][PLAN] t=%lu plan=%u\r\n",
                                   (unsigned long)current_tick,
                                   (unsigned int)robot_ctrl.monitor.plan_enabled);
@@ -322,13 +322,13 @@ void chassis_task_func(void const * argument) {
                     else if (right_rotate_toggle) vw_kb = speed_ratio;
 
                     // custom_r 控制模式下，收到有效目标后强制右旋
-                    if (robot_ctrl.monitor.plan_enabled && (robot_ctrl.target_info.valid == 1U)) {
-                        vw_kb = speed_ratio;
-                        yaw_align_enable = 0U;
-                    }
-
-                    // 自瞄模式联动底盘自转：进入 GIMBAL_AUTO 后底盘持续右旋。
-                    uint8_t auto_spin_active = (robot_ctrl.gimbal_mode == GIMBAL_AUTO) ? 1U : 0U;
+                    // if (robot_ctrl.monitor.plan_enabled && (robot_ctrl.target_info.valid == 1U)) {
+                    //     vw_kb = speed_ratio;
+                    //     yaw_align_enable = 0U;
+                    // }
+                    //
+                    // // 自瞄模式联动底盘自转：进入 GIMBAL_AUTO 后底盘持续右旋。
+                    // uint8_t auto_spin_active = (robot_ctrl.gimbal_mode == GIMBAL_AUTO) ? 1U : 0U;
 
                     // 更新上一帧按键状态（防抖记录）
                     last_q_pressed = q_pressed;
@@ -396,10 +396,10 @@ void chassis_task_func(void const * argument) {
                         vw_final = -angle_error * FOLLOW_P_GAIN;
                     }
 
-                    if (auto_spin_active) {
-                        yaw_align_enable = 0U;
-                        vw_final = speed_ratio;
-                    }
+                    // if (auto_spin_active) {
+                    //     yaw_align_enable = 0U;
+                    //     vw_final = speed_ratio;
+                    // }
 
                     vw_ramp = Chassis_Slew_Limit(vw_final, vw_ramp, CHASSIS_VW_ACCEL_UP, CHASSIS_VW_ACCEL_DOWN, dt_s);
                     vw_final = vw_ramp;
