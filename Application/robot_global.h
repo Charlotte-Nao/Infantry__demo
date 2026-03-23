@@ -50,24 +50,24 @@ typedef struct {
 /* --- CAN2 对端遥测缓存（来自 0x301/0x302） --- */
 typedef struct {
     /* 0x301 */
-    uint8_t robot_id;
-    uint8_t game_progress;
-    uint16_t stage_remain_time;
-    uint16_t current_HP;
-    int16_t capacity_voltage;
+    volatile uint8_t robot_id;
+    volatile uint8_t game_progress;
+    volatile uint16_t stage_remain_time;
+    volatile uint16_t current_HP;
+    volatile int16_t capacity_voltage;
 
     /* 0x302 */
-    uint16_t shooter_17mm_barrel_heat;
-    uint8_t armor_id;
-    uint8_t center_bonus_state;
-    uint8_t rfid_supply19;
-    uint8_t rfid_center23;
+    volatile uint16_t shooter_17mm_barrel_heat;
+    volatile uint8_t armor_id;
+    volatile uint8_t center_bonus_state;
+    volatile uint8_t rfid_supply19;
+    volatile uint8_t rfid_center23;
 
     /* 状态 */
     uint32_t last_tick_301;
     uint32_t last_tick_302;
-    uint8_t online_301;
-    uint8_t online_302;
+    volatile uint8_t online_301;
+    volatile uint8_t online_302;
 } game_info;
 
 /* --- 核心控制结构体 --- */

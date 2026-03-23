@@ -158,7 +158,7 @@ typedef struct {
         uint8_t press_l, press_r, press_m;
     } mouse_vt13;
     struct {
-        uint16_t v;         // 键盘位图
+        volatile uint16_t v;         // 键盘位图
     } key_vt13;
     volatile uint32_t last_update_tick;  // VT13最后更新时间戳（IRQ更新，任务读取）
 } RC_vt13_t;
