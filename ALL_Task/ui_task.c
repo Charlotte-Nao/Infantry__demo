@@ -41,11 +41,12 @@
 #define UI_CAR_X1                    (UI_CAR_CENTER_X + UI_CAR_HALF_SIZE)
 #define UI_CAR_Y1                    (UI_CAR_CENTER_Y + UI_CAR_HALF_SIZE)
 
-// 新增：弹道下坠参考点（实心正方形点）布局
-#define UI_AIM_DROP_OFFSET           60U    // 下坠补偿像素（可根据实际弹道及摩擦轮转速微调）
-#define UI_AIM_X                     UI_CENTER_X
-#define UI_AIM_Y                     (UI_CENTER_Y - UI_AIM_DROP_OFFSET) // Y轴向下减小
-#define UI_AIM_SIZE                  6U     // 正方形边长（即线宽与线长，数字越大点越粗）
+// 新增：弹道下坠瞄准参考点（实心正方形点）布局
+#define UI_AIM_OFFSET_Y              60U    // 下方下坠补偿像素（增大该值，点向下移动）
+#define UI_AIM_OFFSET_X              15U    // 向左偏移像素（增大该值，点向左移动；设为0则居中）
+#define UI_AIM_X                     (UI_CENTER_X - UI_AIM_OFFSET_X)
+#define UI_AIM_Y                     (UI_CENTER_Y - UI_AIM_OFFSET_Y) // Y轴原点在左下角，减去偏移量即为向下
+#define UI_AIM_SIZE                  12U     // 正方形边长（即线宽与线长，数字越大点越粗）
 #define UI_AIM_HALF_SIZE             (UI_AIM_SIZE / 2U)
 
 typedef enum
@@ -449,9 +450,10 @@ void ui_task_func(void const * argument) {
                               (uint16_t)(UI_CENTER_X + 240U), (uint16_t)(UI_CAR_Y0 + 160U), 2U);
 
                         // 弹道下坠瞄准参考点（利用长度等于线宽的线段，画出一个实心正方形）
-                    make_line(&armor_figs7[6], 'A', 'I', 'M', op_armor, REF_UI_COLOR_YELLOW,
-                              (uint16_t)(UI_AIM_X - UI_AIM_HALF_SIZE), UI_AIM_Y,
-                              (uint16_t)(UI_AIM_X + UI_AIM_HALF_SIZE), UI_AIM_Y, UI_AIM_SIZE);
+                        // 弹道下坠瞄准参考点（利用长度等于线宽的线段，画出一个实心正方形）
+                    make_line(&armor_figs7[6], 'A', 'I', 'M', op_armor, REF_UI_COLOR_PINK,
+                            (uint16_t)(UI_AIM_X - UI_AIM_HALF_SIZE), UI_AIM_Y,
+                            (uint16_t)(UI_AIM_X + UI_AIM_HALF_SIZE), UI_AIM_Y, UI_AIM_SIZE);
 
                     }
 
