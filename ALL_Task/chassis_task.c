@@ -62,6 +62,9 @@ static uint8_t left_rotate_toggle = 0;   // Q键切换：左旋状态（1=左旋
 static uint8_t right_rotate_toggle = 0;  // E键切换：右旋状态（1=右旋开启）
 static uint8_t last_q_pressed = 0;       // 上一帧 Q 键状态（防抖）
 static uint8_t last_e_pressed = 0;       // 上一帧 E 键状态（防抖）
+static uint8_t last_r_pressed = 0;       // 新增：上一帧 R 键状态
+static uint8_t last_g_pressed = 0;       // 新增：上一帧 G 键状态
+
 static uint8_t cap_low_gear_lock = 0;    // 超级电容低压锁档（滞回）
 static uint8_t last_custom_r_pressed = 0;// 上一帧 custom_r 状态（路径规划开关防抖）
 
@@ -157,6 +160,8 @@ void chassis_task_func(void const * argument) {
             right_rotate_toggle = 0;
             last_q_pressed = 0;
             last_e_pressed = 0;
+            last_r_pressed = 0;
+            last_g_pressed = 0;
             last_custom_r_pressed = 0;
             vx_ramp = 0.0f;
             vy_ramp = 0.0f;
@@ -211,6 +216,8 @@ void chassis_task_func(void const * argument) {
                 right_rotate_toggle = 0;
                 last_q_pressed = 0;
                 last_e_pressed = 0;
+                last_r_pressed = 0;
+                last_g_pressed = 0;
                 robot_ctrl.monitor.plan_enabled = 0;
                 last_custom_r_pressed = 0;
                 vx_ramp = 0.0f;
@@ -302,22 +309,37 @@ void chassis_task_func(void const * argument) {
                     if (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_A)) vx_kb -= speed_ratio;
                     if (KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_D)) vx_kb += speed_ratio;
 
-                    // Q/E: 切换式按键（按一次切换左旋/右旋状态），使用上升沿检测实现防抖
+                    // Q/E/R/G 按键状态读取
                     uint8_t q_pressed = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_Q);
                     uint8_t e_pressed = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_E);
-                    uint8_t q_trigger = (q_pressed && !last_q_pressed); // Q 上升沿
-                    uint8_t e_trigger = (e_pressed && !last_e_pressed); // E 上升沿
+                    uint8_t r_pressed = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_R);
+                    uint8_t g_pressed = KEY_PRESSED(rc->vt13.key_vt13.v, KEY_VT13_G);
 
-                    if (q_trigger) {
-                        left_rotate_toggle = !left_rotate_toggle;    // 切换左旋状态
-                        if (left_rotate_toggle) right_rotate_toggle = 0; // 互斥，打开左则关闭右
+                    // 边缘检测（上升沿触发防抖）
+                    uint8_t q_trigger = (q_pressed && !last_q_pressed);
+                    uint8_t e_trigger = (e_pressed && !last_e_pressed);
+                    uint8_t r_trigger = (r_pressed && !last_r_pressed);
+                    uint8_t g_trigger = (g_pressed && !last_g_pressed);
+
+                    // 逻辑1：G键强行停止自转（最高优先级）
+                    if (g_trigger) {
+                        left_rotate_toggle = 0;
+                        right_rotate_toggle = 0;
                     }
-                    if (e_trigger) {
-                        right_rotate_toggle = !right_rotate_toggle;  // 切换右旋状态
-                        if (right_rotate_toggle) left_rotate_toggle = 0; // 互斥，打开右则关闭左
+                    // 逻辑2：Q/E/R 的切换逻辑
+                    else {
+                        if (q_trigger) {
+                            left_rotate_toggle = !left_rotate_toggle;    // 切换左旋状态
+                            if (left_rotate_toggle) right_rotate_toggle = 0; // 互斥
+                        }
+                        // E键和R键共享逻辑（逻辑或）
+                        if (e_trigger || r_trigger) {
+                            right_rotate_toggle = !right_rotate_toggle;  // 切换右旋状态
+                            if (right_rotate_toggle) left_rotate_toggle = 0; // 互斥
+                        }
                     }
 
-                    // 根据切换状态设置 vw_kb 为固定手动速度（与 speed_ratio 同量级），或保持为 0
+                    // 根据切换状态设置 vw_kb 为固定手动速度
                     if (left_rotate_toggle) vw_kb = -speed_ratio;
                     else if (right_rotate_toggle) vw_kb = speed_ratio;
 
@@ -331,8 +353,11 @@ void chassis_task_func(void const * argument) {
                     // uint8_t auto_spin_active = (robot_ctrl.gimbal_mode == GIMBAL_AUTO) ? 1U : 0U;
 
                     // 更新上一帧按键状态（防抖记录）
+                    // 更新上一帧按键状态
                     last_q_pressed = q_pressed;
                     last_e_pressed = e_pressed;
+                    last_r_pressed = r_pressed;
+                    last_g_pressed = g_pressed;
 
                     // 路径规划速度采用切换开关，避免必须持续按住 custom_r
                     float vx_plan = robot_ctrl.monitor.plan_enabled ? robot_ctrl.chassis.cmd_vx : 0.0f;
