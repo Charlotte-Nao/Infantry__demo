@@ -30,7 +30,7 @@
 #define STIR_STEP_TICKS ((int32_t)(STIR_STEP_DIR * STIR_ENCODER_CPR * STIR_TOTAL_RATIO * (STIR_STEP_OUTPUT_DEG / 360.0f)))
 
 /* 卡弹堵转自救参数 */
-#define STIR_JAM_CURRENT_THRESH   3500  // 堵转电流阈值
+#define STIR_JAM_CURRENT_THRESH   4500  // 堵转电流阈值
 #define STIR_JAM_VEL_THRESH       120   // 堵转转速阈值
 #define STIR_JAM_DETECT_TICKS     30U   // 连续堵转判定时间 (30 * 2ms = 60ms)
 #define STIR_JAM_REVERSE_TICKS    80U   // 反转持续时间 (80 * 2ms = 160ms)
