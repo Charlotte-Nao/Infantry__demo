@@ -42,7 +42,7 @@
 #define UI_CAR_Y1                    (UI_CAR_CENTER_Y + UI_CAR_HALF_SIZE)
 
 // 新增：弹道下坠瞄准参考点（实心正方形点）布局
-#define UI_AIM_OFFSET_Y              60U    // 下方下坠补偿像素（增大该值，点向下移动）
+#define UI_AIM_OFFSET_Y              30U    // 下方下坠补偿像素（增大该值，点向下移动）
 #define UI_AIM_OFFSET_X              15U    // 向左偏移像素（增大该值，点向左移动；设为0则居中）
 #define UI_AIM_X                     (UI_CENTER_X - UI_AIM_OFFSET_X)
 #define UI_AIM_Y                     (UI_CENTER_Y - UI_AIM_OFFSET_Y) // Y轴原点在左下角，减去偏移量即为向下
