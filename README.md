@@ -76,6 +76,7 @@ cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake
 # 3. 编译工程
 make -j8
 
+###
 ——————————————————————
 上述readme.md文档是直接由ai生成的，仅仅作为一个参考。
 同时，该项目本身就只是一个demo，对于招新的同学看到这个项目作为题目素材进行参考的话，要带有批判性看法。
